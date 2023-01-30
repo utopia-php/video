@@ -1,0 +1,41 @@
+{
+    "name": "shimonewman/streaming",
+    "description": "",
+    "type": "library",
+    "keywords": ["bla","bla"],
+    "license": "MIT",
+    "minimum-stability": "stable",
+    "authors": [
+        {
+            "name": "Shimon Newman",
+            "email": "shimon@appwrite.io"
+        }
+    ],
+    "autoload": {
+        "psr-4": {"Utopia\\Streaming\\": "src/Streaming"}
+    },
+    "autoload-dev": {
+        "psr-4": {"Utopia\\Tests\\": "tests/Streaming"}
+    },
+    "scripts":{
+        "test": "phpunit",
+        "analyse": "vendor/bin/phpstan analyse",
+        "format": "vendor/bin/pint",
+        "lint": "vendor/bin/pint --test"
+    },
+    "require": {
+        "php": ">=8.0",
+        "utopia-php/cli": "0.13.*",
+        "utopia-php/framework": "0.*.*",
+        "php-ffmpeg/php-ffmpeg": "1.*.*"
+    },
+    "require-dev": {
+        "swoole/ide-helper": "4.8.8",
+        "phpunit/phpunit": "^9.5.5",
+        "laravel/pint": "^0.2.3",
+        "phpstan/phpstan": "^1.8"
+    },
+    "suggest": {
+        "ext-swoole": "Needed to support Swoole."
+    }
+}
