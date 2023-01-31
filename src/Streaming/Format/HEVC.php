@@ -2,16 +2,14 @@
 
 namespace Utopia\Streaming\Format;
 
-use Utopia\Streaming\Format\Format;
-
 class HEVC extends Format
 {
-
     /**
      * HEVC constructor.
-     * @param string $video_codec
-     * @param string|null $audio_codec
-     * @param bool $default_init_opts
+     *
+     * @param  string  $video_codec
+     * @param  string|null  $audio_codec
+     * @param  bool  $default_init_opts
      */
     public function __construct(string $video_codec = 'libx265', string $audio_codec = 'aac', bool $default_init_opts = true)
     {
@@ -27,7 +25,7 @@ class HEVC extends Format
             $this->setAdditionalParameters([
                 'keyint_min' => 25,
                 'g' => 250,
-                'sc_threshold' => 40
+                'sc_threshold' => 40,
             ]);
         }
     }
@@ -55,7 +53,7 @@ class HEVC extends Format
      *
      * @see https://wikipedia.org/wiki/Video_compression_picture_types
      *
-     * @return Boolean
+     * @return bool
      */
     public function supportBFrames(): bool
     {

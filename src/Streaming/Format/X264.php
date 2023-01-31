@@ -4,12 +4,12 @@ namespace Utopia\Streaming\Format;
 
 class X264 extends Format
 {
-
     /**
      * X264 constructor.
-     * @param string $video_codec
-     * @param string $audio_codec
-     * @param bool $default_init_opts
+     *
+     * @param  string  $video_codec
+     * @param  string  $audio_codec
+     * @param  bool  $default_init_opts
      */
     public function __construct($video_codec = 'libx264', string $audio_codec = 'aac', bool $default_init_opts = true)
     {
@@ -27,7 +27,7 @@ class X264 extends Format
                 'bf' => 1,
                 'keyint_min' => 25,
                 'g' => 250,
-                'sc_threshold' => 40
+                'sc_threshold' => 40,
             ]);
         }
     }
@@ -48,13 +48,12 @@ class X264 extends Format
         return ['libx264', 'h264', 'h264_afm', 'h264_nvenc'];
     }
 
-
     /**
      * Returns true if the current format supports B-Frames.
      *
      * @see https://wikipedia.org/wiki/Video_compression_picture_types
      *
-     * @return Boolean
+     * @return bool
      */
     public function supportBFrames()
     {

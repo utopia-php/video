@@ -2,16 +2,12 @@
 
 namespace Utopia\Streaming\Format;
 
-use Utopia\Streaming\Format\Format;
-
-
 class VP9 extends Format
 {
-
     /**
-     * @param string $video_codec
-     * @param string|null $audio_codec
-     * @param bool $default_init_opts
+     * @param  string  $video_codec
+     * @param  string|null  $audio_codec
+     * @param  bool  $default_init_opts
      */
     public function __construct(string $video_codec = 'libvpx-vp9', string $audio_codec = 'aac', bool $default_init_opts = true)
     {
@@ -49,7 +45,7 @@ class VP9 extends Format
      *
      * @see https://wikipedia.org/wiki/Video_compression_picture_types
      *
-     * @return Boolean
+     * @return bool
      */
     public function supportBFrames(): bool
     {

@@ -3,6 +3,7 @@
 namespace Utopia\Streaming;
 
 use Utopia\Streaming\Adapter\FFmpeg;
+use Utopia\Streaming\Encoder;
 use Utopia\Streaming\Format\Format;
 
 interface Adapter
@@ -10,9 +11,9 @@ interface Adapter
 
     /**
      * @param  string  $path
-     * @return FFmpeg
+     * @return self
      */
-    public function open(string $path): FFmpeg;
+    public function open(string $path): self;
 
     /**
      * @param  string  $path
@@ -22,14 +23,28 @@ interface Adapter
 
     /**
      * @param Video $video
-     * @return FFmpeg
+     * @return self
      */
-    public function setVideo(Video $video): FFmpeg;
+    public function setVideo(Video $video): self;
 
     /**
      * @param Format $format
-     * @return FFmpeg
+     * @return self
      */
-    public function setFormat(Format $format): FFmpeg;
+    public function setFormat(Format $format): self;
 
+    /**
+     * @param Representation $representation
+     * @return self
+     */
+    public function addRepresentation(Representation $representation): self;
+
+    /**
+     * @param Output $output
+     * @return self
+     */
+    public function setOutput(Output $output): self;
+
+
+    public function run(): void;
 }

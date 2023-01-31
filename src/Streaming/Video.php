@@ -6,12 +6,10 @@ use FFMpeg\FFProbe\DataMapping\StreamCollection;
 
 class Video extends Audio
 {
-
     protected StreamCollection $videoStreams;
 
-
     /**
-     * @param StreamCollection $streams
+     * @param  StreamCollection  $streams
      */
     public function __construct(StreamCollection $streams)
     {
@@ -29,5 +27,4 @@ class Video extends Audio
 
         return $this;
     }
-
 }

@@ -7,8 +7,11 @@ use FFMpeg\Exception\InvalidArgumentException;
 abstract class Format
 {
     protected int $modulus = 2;
+
     protected string $audioCodec;
+
     protected string $videoCodec;
+
     protected array $additionalParameters;
 
     /**
@@ -23,16 +26,15 @@ abstract class Format
      * Sets the audio codec, Should be in the available ones, otherwise an
      * exception is thrown.
      *
-     * @param string $audioCodec
+     * @param  string  $audioCodec
      *
      * @throws InvalidArgumentException
      */
     public function setAudioCodec(string $audioCodec): Format
     {
-        if (!in_array($audioCodec, $this->getAvailableAudioCodecs())) {
+        if (! in_array($audioCodec, $this->getAvailableAudioCodecs())) {
             throw new InvalidArgumentException(sprintf(
-                'Wrong audiocodec value for %s, available formats are %s'
-                , $audioCodec, implode(', ', $this->getAvailableAudioCodecs())
+                'Wrong audiocodec value for %s, available formats are %s', $audioCodec, implode(', ', $this->getAvailableAudioCodecs())
             ));
         }
 
@@ -40,7 +42,6 @@ abstract class Format
 
         return $this;
     }
-
 
     /**
      * @Return string
@@ -54,15 +55,15 @@ abstract class Format
      * Sets the video codec, Should be in the available ones, otherwise an
      * exception is thrown.
      *
-     * @param string $videoCodec
+     * @param  string  $videoCodec
+     *
      * @throws InvalidArgumentException
      */
     public function setVideoCodec(string $videoCodec)
     {
-        if (!in_array($videoCodec, $this->getAvailableVideoCodecs())) {
+        if (! in_array($videoCodec, $this->getAvailableVideoCodecs())) {
             throw new InvalidArgumentException(sprintf(
-                'Wrong videocodec value for %s, available formats are %s'
-                , $videoCodec, implode(', ', $this->getAvailableVideoCodecs())
+                'Wrong videocodec value for %s, available formats are %s', $videoCodec, implode(', ', $this->getAvailableVideoCodecs())
             ));
         }
 
@@ -71,9 +72,8 @@ abstract class Format
         return $this;
     }
 
-
     /**
-     * @param array $additionalParameters
+     * @param  array  $additionalParameters
      * @return Format
      */
     public function setAdditionalParameters(array $additionalParameters): Format

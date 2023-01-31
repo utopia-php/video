@@ -2,13 +2,10 @@
 
 namespace Utopia\Tests;
 
-
 use PHPUnit\Framework\TestCase;
-use Streaming\Format\X264;
 use Utopia\Streaming\Adapter\FFmpeg;
 use Utopia\Streaming\Encoder;
-use \FFMpeg\FFMpeg as BFFmpeg;
-
+use Utopia\Streaming\Stream;
 
 class FFmpegTest extends TestCase
 {
@@ -16,17 +13,29 @@ class FFmpegTest extends TestCase
 
     public static function setUpBeforeClass(): void
     {
-       self::$encoder = new Encoder(new FFmpeg());
-
+        self::$encoder = new Encoder(new FFmpeg([
+            'timeout' => 0,
+            'ffmpeg.threads' => 12,
+        ]
+       ));
     }
 
     public function testFFmpeg(): void
     {
-        $encoder= self::$encoder->open(__DIR__ . '/../resources/sample.mp4');
-        $encoder->setFormat(new \Utopia\Streaming\Format\X264());
-        var_dump($encoder);
-        //self::assertInstanceOf(self::$encoder, BFFmpeg);
+
+        $representation = (new \Utopia\Streaming\Representation())
+            ->setVideoKiloBitrate(6000)
+            ->setAudioKiloBitrate(128)
+            ->setResize(1080, 768);
+
+        (new Stream(self::$encoder))
+            ->open(__DIR__.'/../resources/sample.mp4')
+            ->setFormat(new \Utopia\Streaming\Format\X264())
+            ->addRepresentation($representation)
+            ->setOutput(new \Utopia\Streaming\Output\Hls())
+            ->run()
+        ;
+
+
     }
-
-
 }
