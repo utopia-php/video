@@ -1,54 +1,64 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Utopia\Streaming\Format;
+
+use Utopia\Streaming\Format;
 
 class VP9 extends Format
 {
-    /**
-     * @param  string  $video_codec
-     * @param  string|null  $audio_codec
-     * @param  bool  $default_init_opts
-     */
-    public function __construct(string $video_codec = 'libvpx-vp9', string $audio_codec = 'aac', bool $default_init_opts = true)
-    {
-        $this
-            ->setVideoCodec($video_codec)
-            ->setAudioCodec($audio_codec);
+    private const MODULUS = 2;
 
-        /**
-         * set the default value of h265 codec options
-         * see https://ffmpeg.org/ffmpeg-codecs.html#Options-26 for more information about options
-         */
-        if ($default_init_opts) {
-            //@TODO: add default vp9
+    private const AUDIO_CODECS = ['libvorbis', 'aac'];
+
+    private const VIDEO_CODECS = ['libvpx', 'libvpx-vp9'];
+
+    public function __construct(
+        string $videoCodec = 'libvpx-vp9',
+        string $audioCodec = 'libvorbis',
+        bool $defaultInitOpts = true
+    ) {
+        $this
+            ->setVideoCodec($videoCodec)
+            ->setAudioCodec($audioCodec);
+
+        if ($defaultInitOpts) {
+            $this->setAdditionalParameters([
+                'deadline' => 'good',
+                'cpu-used' => 2,
+                'row-mt' => 1,
+                'tile-columns' => 2,
+                'frame-parallel' => 1,
+                'g' => 250,
+                'keyint_min' => 25,
+            ]);
         }
     }
 
     /**
-     * {@inheritDoc}
+     * @return list<string>
      */
-    public function getAvailableAudioCodecs()
+    public function getAvailableAudioCodecs(): array
     {
-        return ['libvorbis'];
+        return self::AUDIO_CODECS;
     }
 
     /**
-     * @return array
+     * @return list<string>
      */
     public function getAvailableVideoCodecs(): array
     {
-        return ['libvpx', 'libvpx-vp9'];
+        return self::VIDEO_CODECS;
     }
 
-    /**
-     * Returns true if the current format supports B-Frames.
-     *
-     * @see https://wikipedia.org/wiki/Video_compression_picture_types
-     *
-     * @return bool
-     */
+    public function getModulus(): int
+    {
+        return self::MODULUS;
+    }
+
     public function supportBFrames(): bool
     {
-        return true;
+        return false;
     }
 }

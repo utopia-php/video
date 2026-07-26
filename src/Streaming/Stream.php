@@ -1,69 +1,75 @@
 <?php
 
-namespace Utopia\Streaming;
+declare(strict_types=1);
 
-use Utopia\Streaming\Format\Format;
+namespace Utopia\Streaming;
 
 class Stream
 {
-    private Encoder $encoder;
+    private Adapter $adapter;
 
-    /**
-     * @param  Encoder  $encoder
-     * @return void
-     */
-    public function __construct(Encoder $encoder)
+    public function __construct(Adapter $adapter)
     {
-        $this->encoder = $encoder;
+        $this->adapter = $adapter;
     }
 
-    /**
-     * @param  string  $path
-     * @return self
-     */
     public function open(string $path): self
     {
-        $this->encoder->open($path);
+        $this->adapter->open($path);
 
         return $this;
     }
 
-    /**
-     * @param  Format  $format
-     * @return self
-     */
+    public function isValid(string $path): bool
+    {
+        return $this->adapter->isValid($path);
+    }
+
     public function setFormat(Format $format): self
     {
-        $this->encoder->setFormat($format);
+        $this->adapter->setFormat($format);
 
         return $this;
     }
 
-    /**
-     * @param  Representation  $representation
-     * @return self
-     */
     public function addRepresentation(Representation $representation): self
     {
-        $this->encoder->addRepresentation($representation);
+        $this->adapter->addRepresentation($representation);
 
         return $this;
     }
 
     /**
-     * @param  Output  $output
-     * @return self
+     * @param  list<Representation>  $reps
      */
-    public function setOutput(Output $output): self
+    public function addRepresentations(array $reps): self
     {
-        $this->encoder->setOutput($output);
+        $this->adapter->addRepresentations($reps);
 
         return $this;
     }
 
+    public function setOutput(Output $output): self
+    {
+        $this->adapter->setOutput($output);
+
+        return $this;
+    }
+
+    public function save(?string $path = null): self
+    {
+        $this->adapter->save($path);
+
+        return $this;
+    }
 
     public function run(): void
     {
-        $this->encoder->run();
+        $this->adapter->run();
+    }
+
+    public function getAdapter(): Adapter
+    {
+        return $this->adapter;
     }
 }

@@ -1,50 +1,27 @@
 <?php
 
-namespace Utopia\Streaming;
+declare(strict_types=1);
 
-use Utopia\Streaming\Adapter\FFmpeg;
-use Utopia\Streaming\Encoder;
-use Utopia\Streaming\Format\Format;
+namespace Utopia\Streaming;
 
 interface Adapter
 {
-
-    /**
-     * @param  string  $path
-     * @return self
-     */
     public function open(string $path): self;
 
-    /**
-     * @param  string  $path
-     * @return bool
-     */
     public function isValid(string $path): bool;
 
-    /**
-     * @param Video $video
-     * @return self
-     */
-    public function setVideo(Video $video): self;
-
-    /**
-     * @param Format $format
-     * @return self
-     */
     public function setFormat(Format $format): self;
 
-    /**
-     * @param Representation $representation
-     * @return self
-     */
     public function addRepresentation(Representation $representation): self;
 
     /**
-     * @param Output $output
-     * @return self
+     * @param  list<Representation>  $reps
      */
+    public function addRepresentations(array $reps): self;
+
     public function setOutput(Output $output): self;
 
+    public function save(?string $path = null): self;
 
     public function run(): void;
 }

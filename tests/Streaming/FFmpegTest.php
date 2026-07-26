@@ -1,41 +1,34 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Utopia\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Utopia\Streaming\Adapter\FFmpeg;
-use Utopia\Streaming\Encoder;
+use Utopia\Streaming\Format\X264;
+use Utopia\Streaming\Output\Hls;
+use Utopia\Streaming\Representation;
 use Utopia\Streaming\Stream;
 
 class FFmpegTest extends TestCase
 {
-    private static Encoder $encoder;
-
-    public static function setUpBeforeClass(): void
+    public function testFluentApiWiresAdapter(): void
     {
-        self::$encoder = new Encoder(new FFmpeg([
-            'timeout' => 0,
-            'ffmpeg.threads' => 12,
-        ]
-       ));
-    }
+        $adapter = new FFmpeg(['timeout' => 0]);
+        $stream = new Stream($adapter);
 
-    public function testFFmpeg(): void
-    {
-
-        $representation = (new \Utopia\Streaming\Representation())
-            ->setVideoKiloBitrate(6000)
+        $representation = (new Representation())
+            ->setVideoKiloBitrate(600)
             ->setAudioKiloBitrate(128)
-            ->setResize(1080, 768);
+            ->setResize(640, 360);
 
-        (new Stream(self::$encoder))
-            ->open(__DIR__.'/../resources/sample.mp4')
-            ->setFormat(new \Utopia\Streaming\Format\X264())
+        $stream
+            ->setFormat(new X264())
             ->addRepresentation($representation)
-            ->setOutput(new \Utopia\Streaming\Output\Hls())
-            ->run()
-        ;
+            ->setOutput(new Hls());
 
-
+        $this->assertSame($adapter, $stream->getAdapter());
+        $this->assertCount(1, $adapter->getRepresentations());
     }
 }

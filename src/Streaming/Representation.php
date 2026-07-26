@@ -1,15 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Utopia\Streaming;
 
-use FFMpeg\Exception\InvalidArgumentException;
+use Utopia\Streaming\Exception\InvalidArgumentException;
 
 class Representation
 {
-    public function __construct()
-    {
-    }
-
     protected int $width = 0;
 
     protected int $height = 0;
@@ -18,12 +16,7 @@ class Representation
 
     protected int $audioKiloBitrate = 0;
 
-    /**
-     * @param  int  $width
-     * @param  int  $height
-     * @return Representation
-     */
-    public function setResize(int $width, int $height): Representation
+    public function setResize(int $width, int $height): self
     {
         if ($width < 50 || $height < 50) {
             throw new InvalidArgumentException('Invalid video resize value');
@@ -35,35 +28,25 @@ class Representation
         return $this;
     }
 
-    /**
-     * @return int
-     */
     public function getWidth(): int
     {
         return $this->width;
     }
 
-    /**
-     * @return int
-     */
     public function getHeight(): int
     {
         return $this->height;
     }
 
     /**
-     * @return int
+     * Resolution as an ffmpeg size string, e.g. "1280x720".
      */
-    public function getSize(): int
+    public function getResolution(): string
     {
-        return implode('x', [$this->getWidth(), $this->getHeight()]);
+        return $this->width.'x'.$this->height;
     }
 
-    /**
-     * @param  int  $videoKiloBitrate
-     * @return Representation
-     */
-    public function setVideoKiloBitrate(int $videoKiloBitrate): Representation
+    public function setVideoKiloBitrate(int $videoKiloBitrate): self
     {
         if ($videoKiloBitrate < 1) {
             throw new InvalidArgumentException('Invalid video kilo bit rate value');
@@ -75,18 +58,27 @@ class Representation
     }
 
     /**
-     * @return int
+     * Alias matching the fork's Representation::setKiloBitrate().
      */
+    public function setKiloBitrate(int $kiloBitrate): self
+    {
+        return $this->setVideoKiloBitrate($kiloBitrate);
+    }
+
     public function getVideoKiloBitrate(): int
     {
         return $this->videoKiloBitrate;
     }
 
     /**
-     * @param  int  $audioKiloBitrate
-     * @return Representation
+     * Alias matching the fork's Representation::getKiloBitrate().
      */
-    public function setAudioKiloBitrate(int $audioKiloBitrate): Representation
+    public function getKiloBitrate(): int
+    {
+        return $this->videoKiloBitrate;
+    }
+
+    public function setAudioKiloBitrate(int $audioKiloBitrate): self
     {
         if ($audioKiloBitrate < 1) {
             throw new InvalidArgumentException('Invalid audio kilo bit rate value');
@@ -97,9 +89,6 @@ class Representation
         return $this;
     }
 
-    /**
-     * @return int
-     */
     public function getAudioKiloBitrate(): int
     {
         return $this->audioKiloBitrate;

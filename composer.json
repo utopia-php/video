@@ -1,8 +1,8 @@
 {
     "name": "shimonewman/streaming",
-    "description": "",
+    "description": "FFmpeg-based ABR packaging library for HLS and DASH",
     "type": "library",
-    "keywords": ["bla","bla"],
+    "keywords": ["hls", "dash", "ffmpeg", "streaming", "abr", "adaptive"],
     "license": "MIT",
     "minimum-stability": "stable",
     "authors": [
@@ -24,9 +24,7 @@
         "lint": "vendor/bin/pint --test"
     },
     "require": {
-        "php": ">=8.0",
-        "utopia-php/cli": "0.13.*",
-        "utopia-php/framework": "0.*.*",
+        "php": "^8.1",
         "php-ffmpeg/php-ffmpeg": "1.*.*"
     },
     "require-dev": {
