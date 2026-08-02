@@ -1,8 +1,8 @@
 {
-    "name": "shimonewman/streaming",
-    "description": "FFmpeg-based ABR packaging library for HLS and DASH",
+    "name": "utopia-php/video",
+    "description": "A simple library to probe, encode and package video for adaptive streaming",
     "type": "library",
-    "keywords": ["hls", "dash", "ffmpeg", "streaming", "abr", "adaptive"],
+    "keywords": ["php", "framework", "upf", "utopia", "streaming", "video", "hls", "dash", "cmaf", "ffmpeg"],
     "license": "MIT",
     "minimum-stability": "stable",
     "authors": [
@@ -12,28 +12,35 @@
         }
     ],
     "autoload": {
-        "psr-4": {"Utopia\\Streaming\\": "src/Streaming"}
+        "psr-4": {"Utopia\\Video\\": "src/Video"}
     },
     "autoload-dev": {
-        "psr-4": {"Utopia\\Tests\\": "tests/Streaming"}
+        "psr-4": {"Utopia\\Tests\\": "tests/Video"}
     },
-    "scripts":{
-        "test": "phpunit",
-        "analyse": "vendor/bin/phpstan analyse",
-        "format": "vendor/bin/pint",
-        "lint": "vendor/bin/pint --test"
+    "scripts": {
+        "test": "./vendor/bin/phpunit --configuration phpunit.xml",
+        "test:unit": "./vendor/bin/phpunit --configuration phpunit.xml --testsuite unit",
+        "test:e2e": "./vendor/bin/phpunit --configuration phpunit.xml --testsuite e2e",
+        "samples": "@php -r \"require 'vendor/autoload.php'; Utopia\\\\Tests\\\\Samples::build();\"",
+        "samples:rebuild": "@php -r \"require 'vendor/autoload.php'; Utopia\\\\Tests\\\\Samples::build(true);\"",
+        "check": "./vendor/bin/phpstan analyse",
+        "format": "./vendor/bin/pint",
+        "lint": "./vendor/bin/pint --test"
     },
     "require": {
-        "php": "^8.1",
-        "php-ffmpeg/php-ffmpeg": "1.*.*"
+        "php": ">=8.1",
+        "ext-dom": "*",
+        "ext-json": "*",
+        "utopia-php/console": "^0.2"
     },
     "require-dev": {
-        "swoole/ide-helper": "4.8.8",
-        "phpunit/phpunit": "^9.5.5",
-        "laravel/pint": "^0.2.3",
-        "phpstan/phpstan": "^1.8"
+        "phpunit/phpunit": "9.*",
+        "phpstan/phpstan": "1.*",
+        "laravel/pint": "1.*"
     },
-    "suggest": {
-        "ext-swoole": "Needed to support Swoole."
+    "config": {
+        "platform": {
+            "php": "8.1"
+        }
     }
 }
