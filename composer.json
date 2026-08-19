@@ -23,12 +23,12 @@
         "test:e2e": "./vendor/bin/phpunit --configuration phpunit.xml --testsuite e2e",
         "samples": "@php -r \"require 'vendor/autoload.php'; Utopia\\\\Tests\\\\Samples::build();\"",
         "samples:rebuild": "@php -r \"require 'vendor/autoload.php'; Utopia\\\\Tests\\\\Samples::build(true);\"",
-        "check": "./vendor/bin/phpstan analyse",
+        "check": "./vendor/bin/phpstan analyse --memory-limit=512M",
         "format": "./vendor/bin/pint",
         "lint": "./vendor/bin/pint --test"
     },
     "require": {
-        "php": ">=8.1",
+        "php": ">=8.2",
         "ext-dom": "*",
         "ext-json": "*",
         "utopia-php/console": "^0.2"
@@ -40,7 +40,7 @@
     },
     "config": {
         "platform": {
-            "php": "8.1"
+            "php": "8.2"
         }
     }
 }

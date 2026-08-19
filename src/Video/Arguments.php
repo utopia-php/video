@@ -18,6 +18,8 @@ use Utopia\Video\Exception\Unsupported;
  */
 abstract class Arguments
 {
+    use Decimal;
+
     /**
      * @param  list<Representation>  $reps
      * @param  int  $inputs  How many files were opened. More than one means each
@@ -39,6 +41,19 @@ abstract class Arguments
             throw new Unsupported(
                 \strtoupper($output->type()).' cannot carry '.$format->codec()
                 .'; supported: '.\implode(', ', $format->supports()),
+            );
+        }
+
+        $interval = $format->interval();
+
+        // A cut can only land on a keyframe, so keyframes further apart than a
+        // segment cannot produce segments of the length that was asked for. The
+        // muxer would carry on regardless and write longer ones.
+        if ($interval !== null && $interval > $output->duration()) {
+            throw new Unsupported(
+                'A keyframe every '.self::number($interval).'s cannot cut '
+                .self::number($output->duration()).'s segments; segments start on keyframes, so the '
+                .'keyframe interval has to be the segment length or a fraction of it',
             );
         }
     }
@@ -100,6 +115,12 @@ abstract class Arguments
     /**
      * Audio streams to carry through, one entry per output audio stream.
      *
+     * Every track comes through, tagged or not: a language is what tells one
+     * rendition from another in a manifest, but a track without one is still a
+     * track, and dropping it would lose a dub the source actually carried.
+     * Untagged tracks are reported with an empty language, which the builders
+     * read as "nothing to say about this one".
+     *
      * @return list<array{index: int, language: string}>
      */
     protected function sound(): array
@@ -113,20 +134,23 @@ abstract class Arguments
         foreach ($this->info->audioTracks as $index => $track) {
             $language = $track['language'];
 
-            if ($language === '' || $language === 'und') {
-                continue;
-            }
-
-            $tracks[] = ['index' => $index, 'language' => $language];
+            $tracks[] = [
+                'index' => $index,
+                'language' => $language === 'und' ? '' : $language,
+            ];
         }
 
-        // Nothing carried a language tag, so there is just one anonymous track.
+        // A probe that found audio without describing it still has one track.
         return $tracks === [] ? [['index' => 0, 'language' => '']] : $tracks;
     }
 
     /**
      * Stream selection: each video rung reads the same source stream, and every
      * audio track is carried once.
+     *
+     * Audio always comes from the first input. With one input that is the source
+     * itself; with several it is the first encoded rung, which carries every
+     * track the source had, so the track indices hold either way.
      *
      * @return list<string>
      */
@@ -142,7 +166,7 @@ abstract class Arguments
 
         foreach ($this->sound() as $track) {
             $args[] = '-map';
-            $args[] = '0:a:'.($split ? 0 : $track['index']);
+            $args[] = '0:a:'.$track['index'];
         }
 
         return $args;
@@ -158,7 +182,10 @@ abstract class Arguments
         $visual = $this->visual();
         $tracks = $this->sound();
 
-        $args = $this->format->build($visual, $tracks !== []);
+        // The segment length doubles as the keyframe cadence unless the caller
+        // named one, so a ladder packaged with the defaults is still cut on
+        // keyframes rather than wherever the encoder happened to put one.
+        $args = $this->format->build($visual, $tracks !== [], $this->output->duration());
 
         if ($visual) {
             $position = 0;

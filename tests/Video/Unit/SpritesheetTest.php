@@ -6,6 +6,7 @@ namespace Utopia\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Cue;
+use Utopia\Video\Exception\Input;
 use Utopia\Video\Spritesheet;
 use Utopia\Video\Tile;
 
@@ -132,5 +133,16 @@ class SpritesheetTest extends TestCase
         $this->assertSame(5, $tile->scale());
         $this->assertSame('thumbs', $tile->base());
         $this->assertFalse($tile->writes());
+    }
+
+    /**
+     * Sheet names become filenames in the directory they were given, so one that
+     * leaves it is refused.
+     */
+    public function testASheetNameThatLeavesTheDirectoryIsRejected(): void
+    {
+        $this->expectException(Input::class);
+
+        (new Tile())->name('../sheets');
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Utopia\Video;
 
-use Utopia\Console;
 use Utopia\Video\Adapter\Encoder;
 use Utopia\Video\Adapter\FFmpeg;
 use Utopia\Video\Adapter\FFprobe;
@@ -96,6 +95,15 @@ abstract class Adapter
      * is exactly the bug this replaces.
      */
     protected ?Probe $prober = null;
+
+    /**
+     * Where status lines go.
+     *
+     * Resolved late for the same reason as the probe: a caller replacing the
+     * destination after construction has to win, and a default built eagerly
+     * would tie every adapter to the terminal whether or not it is on one.
+     */
+    protected ?Reporter $reporter = null;
 
     /** @var array<string, list<callable>> */
     protected array $listeners = [];
@@ -214,6 +222,17 @@ abstract class Adapter
     }
 
     /**
+     * Tell this adapter where to put its status lines.
+     *
+     * Called by the facade so that one destination serves the whole job. Pass a
+     * Reporter\Silent to keep the library off stdout entirely.
+     */
+    public function setReporter(Reporter $reporter): void
+    {
+        $this->reporter = $reporter;
+    }
+
+    /**
      * Register a listener. See Adapter\Observable::PROGRESS and ::LOG.
      *
      * @param  callable  $listener
@@ -239,6 +258,14 @@ abstract class Adapter
     protected function prober(): Probe
     {
         return $this->prober ??= new FFprobe();
+    }
+
+    /**
+     * Resolved late, so a reporter handed over after construction still wins.
+     */
+    protected function reporter(): Reporter
+    {
+        return $this->reporter ??= new Reporter\Console();
     }
 
     protected function emit(string $event, mixed $payload): void
@@ -297,12 +324,12 @@ abstract class Adapter
     }
 
     /**
-     * Green status line for a finished encode, pack, grab or tile.
+     * Status line for a finished encode, pack, grab or tile.
      *
-     * Quiet backends stay silent; everything else prints so a consumer sees
+     * Quiet backends stay silent; everything else reports so a consumer sees
      * the outcome without attaching a LOG listener.
      *
-     * @return bool Whether a line was printed.
+     * @return bool Whether a line was reported.
      */
     protected function reportSuccess(string $message): bool
     {
@@ -310,15 +337,15 @@ abstract class Adapter
             return false;
         }
 
-        Console::success($message);
+        $this->reporter()->success($message);
 
         return true;
     }
 
     /**
-     * Red status line before a command failure is thrown.
+     * Status line before a command failure is thrown.
      *
-     * @return bool Whether a line was printed.
+     * @return bool Whether a line was reported.
      */
     protected function reportError(string $message): bool
     {
@@ -326,7 +353,7 @@ abstract class Adapter
             return false;
         }
 
-        Console::error($message);
+        $this->reporter()->error($message);
 
         return true;
     }

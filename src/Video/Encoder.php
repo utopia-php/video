@@ -32,8 +32,15 @@ class Encoder
 
     protected readonly Probe $prober;
 
-    public function __construct(?EncoderAdapter $adapter = null, ?Probe $probe = null)
-    {
+    /**
+     * @param  Reporter|null  $reporter  Where status lines go; null keeps them on
+     *                                   the terminal.
+     */
+    public function __construct(
+        ?EncoderAdapter $adapter = null,
+        ?Probe $probe = null,
+        ?Reporter $reporter = null,
+    ) {
         $this->adapter = $adapter ?? new FFmpeg();
         $this->prober = $probe ?? new FFprobe();
 
@@ -42,6 +49,10 @@ class Encoder
         // a probe of its own and ignore the one asked for here.
         if ($this->adapter instanceof Adapter) {
             $this->adapter->setProbe($this->prober);
+
+            if ($reporter !== null) {
+                $this->adapter->setReporter($reporter);
+            }
         }
     }
 

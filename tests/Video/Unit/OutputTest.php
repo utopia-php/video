@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Utopia\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use Utopia\Video\Exception\Input;
 use Utopia\Video\Output;
 use Utopia\Video\Output\Cmaf;
 use Utopia\Video\Output\Dash;
@@ -147,6 +148,51 @@ class OutputTest extends TestCase
     public function testManifestsCanBeTurnedOff(): void
     {
         $this->assertFalse((new Hls())->manifests(false)->keeps());
+    }
+
+    /**
+     * The base name is joined onto the output directory to build every filename,
+     * so a name that walks back out of it is refused rather than followed.
+     *
+     * @testdox A base name that leaves the output directory is rejected
+     */
+    public function testBaseNameCannotEscapeTheOutputDirectory(): void
+    {
+        foreach (['../escape', '/etc/passwd', 'sub/dir', '', 'with space', "null\0byte"] as $name) {
+            try {
+                (new Hls())->name($name);
+                $this->fail('expected "'.$name.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a name', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testManifestAndPlaylistFilenamesHaveToBePlainNames(): void
+    {
+        foreach ([Hls::class, Cmaf::class] as $class) {
+            try {
+                /** @var Hls|Cmaf $output */
+                $output = new $class();
+                $output->master('../master.m3u8');
+                $this->fail('expected a traversing master name to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a filename', $exception->getMessage());
+            }
+        }
+
+        $this->expectException(Input::class);
+
+        (new Dash())->manifest('/tmp/manifest.mpd');
+    }
+
+    public function testAnInitSegmentNameStillHasToBeAFilename(): void
+    {
+        $this->assertSame('start.mp4', (new Hls())->init('start.mp4')->initFile());
+
+        $this->expectException(Input::class);
+
+        (new Hls())->init('../init.mp4');
     }
 
     public function testThumbDefaults(): void

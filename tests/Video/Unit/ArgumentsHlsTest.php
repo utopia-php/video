@@ -169,6 +169,104 @@ class ArgumentsHlsTest extends TestCase
         $this->assertStringContainsString('a:0,agroup:audio,name:audio_0,default:yes', $argv);
     }
 
+    /**
+     * A language tag is what tells one rendition from another, but a track
+     * without one is still a track: a file carrying four untagged dubs has to
+     * come out with four, not with the first one alone.
+     */
+    public function testEveryUntaggedTrackIsStillCarried(): void
+    {
+        $info = $this->info(audioTracks: [
+            ['codec' => 'aac', 'language' => 'und'],
+            ['codec' => 'aac', 'language' => 'und'],
+            ['codec' => 'aac', 'language' => ''],
+        ]);
+
+        $argv = $this->build($info, [new Representation(1280, 720, 2538, 128)]);
+
+        $this->assertSame(3, \substr_count($argv, '-map 0:a:'));
+        $this->assertStringContainsString('-map 0:a:0', $argv);
+        $this->assertStringContainsString('-map 0:a:1', $argv);
+        $this->assertStringContainsString('-map 0:a:2', $argv);
+        $this->assertStringContainsString('a:0,agroup:audio,name:audio_0,default:yes', $argv);
+        $this->assertStringContainsString('a:1,agroup:audio,name:audio_1', $argv);
+        $this->assertStringContainsString('a:2,agroup:audio,name:audio_2', $argv);
+        $this->assertStringNotContainsString('language:und', $argv);
+    }
+
+    /**
+     * @testdox A partly tagged source keeps its untagged tracks too
+     */
+    public function testTaggedAndUntaggedTracksTravelTogether(): void
+    {
+        $info = $this->info(audioTracks: [
+            ['codec' => 'aac', 'language' => 'eng'],
+            ['codec' => 'aac', 'language' => 'und'],
+            ['codec' => 'aac', 'language' => 'spa'],
+        ]);
+
+        $argv = $this->build($info, [new Representation(1280, 720, 2538, 128)]);
+
+        $this->assertSame(3, \substr_count($argv, '-map 0:a:'));
+        $this->assertStringContainsString('a:0,agroup:audio,language:eng,name:audio_0,default:yes', $argv);
+        $this->assertStringContainsString('a:1,agroup:audio,name:audio_1', $argv);
+        $this->assertStringContainsString('a:2,agroup:audio,language:spa,name:audio_2', $argv);
+    }
+
+    /**
+     * Segments are cut where a keyframe already is, so a job that never named a
+     * cadence takes the segment length rather than leaving the encoder to put
+     * keyframes wherever it liked.
+     */
+    public function testKeyframesFollowTheSegmentLengthWhenNoneWasAskedFor(): void
+    {
+        $arguments = new Arguments(
+            $this->info(),
+            new X264(),
+            [new Representation(1280, 720, 2538)],
+            (new Hls())->segment(4),
+            '/out',
+        );
+
+        $argv = \implode(' ', $arguments->build());
+
+        $this->assertStringContainsString('-force_key_frames expr:gte(t,n_forced*4)', $argv);
+        $this->assertStringContainsString('-hls_time 4', $argv);
+    }
+
+    public function testAnExplicitKeyframeIntervalStillWins(): void
+    {
+        $arguments = new Arguments(
+            $this->info(),
+            (new X264())->keyframe(2.0),
+            [new Representation(1280, 720, 2538)],
+            (new Hls())->segment(6),
+            '/out',
+        );
+
+        $argv = \implode(' ', $arguments->build());
+
+        $this->assertStringContainsString('-force_key_frames expr:gte(t,n_forced*2)', $argv);
+        $this->assertStringContainsString('-hls_time 6', $argv);
+    }
+
+    /**
+     * @testdox Keyframes further apart than a segment are rejected
+     */
+    public function testKeyframesFurtherApartThanASegmentAreRejected(): void
+    {
+        $this->expectException(Unsupported::class);
+        $this->expectExceptionMessage('A keyframe every 10s cannot cut 4s segments');
+
+        new Arguments(
+            $this->info(),
+            (new X264())->keyframe(10.0),
+            [new Representation(1280, 720, 2538)],
+            (new Hls())->segment(4),
+            '/out',
+        );
+    }
+
     public function testAudioOnlySourceDropsEveryVideoArgument(): void
     {
         $argv = $this->build(

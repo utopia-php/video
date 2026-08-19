@@ -58,7 +58,7 @@ final class Tile
 
     public function name(string $base): self
     {
-        $this->name = $base;
+        $this->name = Name::label($base, 'Sprite sheet name');
 
         return $this;
     }

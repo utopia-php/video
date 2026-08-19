@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Video\Output;
 
+use Utopia\Video\Name;
 use Utopia\Video\Output;
 
 /**
@@ -46,14 +47,14 @@ final class Hls extends Output
      */
     public function init(string $filename): static
     {
-        $this->init = $filename;
+        $this->init = Name::file($filename, 'Initialisation segment');
 
         return $this;
     }
 
     public function master(string $filename): static
     {
-        $this->master = $filename;
+        $this->master = Name::file($filename, 'Master playlist');
 
         return $this;
     }

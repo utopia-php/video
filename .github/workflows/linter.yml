@@ -1,6 +1,11 @@
 name: "Linter"
 
-on: [ pull_request ]
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
 jobs:
   lint:
     name: Linter
@@ -12,7 +17,10 @@ jobs:
         with:
           fetch-depth: 2
 
+      # Platform requirements are enforced here as they are in the image the
+      # tests run in: a dependency that could not run on a supported PHP should
+      # fail the job rather than install and be linted anyway.
       - name: Run Linter
         run: |
-          docker run --rm -v $PWD:/app composer sh -c \
-          "composer install --profile --ignore-platform-reqs && composer lint"
+          docker run --rm -v $PWD:/app composer:2 sh -c \
+          "composer install --profile && composer lint"

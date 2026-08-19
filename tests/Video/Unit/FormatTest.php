@@ -45,6 +45,21 @@ class FormatTest extends TestCase
         $this->assertContains('expr:gte(t,n_forced*1.5)', $args);
     }
 
+    /**
+     * Packaging passes the segment length as the cadence to fall back on, since
+     * a segment can only start where a keyframe already is. An encode to a plain
+     * file has no segments and passes nothing.
+     */
+    public function testAFallbackCadenceIsUsedOnlyWhenNoneWasSet(): void
+    {
+        $this->assertContains('expr:gte(t,n_forced*6)', (new X264())->build(cadence: 6.0));
+        $this->assertContains(
+            'expr:gte(t,n_forced*2)',
+            (new X264())->keyframe(2.0)->build(cadence: 6.0),
+        );
+        $this->assertNotContains('-force_key_frames', (new X264())->build());
+    }
+
     public function testRawParametersAreAppendedLast(): void
     {
         $args = (new X264())->crf(22)->params(['-dn', '-sn'])->build();

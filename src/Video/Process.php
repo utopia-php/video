@@ -20,6 +20,21 @@ final class Process
     private const TAIL = 8192;
 
     /**
+     * Longest run of interrupted waits to sit through before giving up.
+     *
+     * A signal arriving mid-wait makes stream_select report failure without
+     * anything actually being wrong, so a handful in a row are shrugged off; a
+     * stream that keeps reporting failure is a real one.
+     */
+    private const RETRIES = 10;
+
+    /** Bytes of one unbroken line to hold before emitting it anyway. */
+    private const LINE = 65536;
+
+    /** Seconds a killed command is given to explain itself. */
+    private const GRACE = 2.0;
+
+    /**
      * @param  list<string>  $command
      * @param  callable(string):void|null  $stdout  Called once per line written to stdout.
      * @param  callable(string):void|null  $stderr  Called once per line written to stderr.
@@ -63,14 +78,40 @@ final class Process
         $started = \microtime(true);
         $open = [1 => $pipes[1], 2 => $pipes[2]];
 
+        $interrupted = 0;
+
         while ($open !== []) {
+            // Checked before the wait rather than after the read, so a command
+            // that has gone quiet is still stopped on time.
+            if ($timeout > 0 && (\microtime(true) - $started) > $timeout) {
+                throw self::halt(
+                    $process,
+                    $open,
+                    $errors,
+                    'Command "'.$command[0].'" timed out after '.$timeout.'s',
+                    $command,
+                );
+            }
+
             $read = \array_values($open);
             $write = null;
             $except = null;
 
             if (@\stream_select($read, $write, $except, 0, 200000) === false) {
-                break;
+                if (++$interrupted <= self::RETRIES) {
+                    continue;
+                }
+
+                throw self::halt(
+                    $process,
+                    $open,
+                    $errors,
+                    'Lost contact with "'.$command[0].'" while reading its output',
+                    $command,
+                );
             }
+
+            $interrupted = 0;
 
             foreach ($open as $key => $pipe) {
                 if (! \in_array($pipe, $read, true)) {
@@ -114,21 +155,14 @@ final class Process
                         self::emit($key, $line, $stdout, $stderr);
                     }
                 }
-            }
 
-            if ($timeout > 0 && (\microtime(true) - $started) > $timeout) {
-                foreach ($open as $pipe) {
-                    \fclose($pipe);
+                // Nothing says a stream has to send line breaks, and a binary
+                // one never will, so a buffer that has grown past a plausible
+                // line is handed over as it stands rather than held forever.
+                if (\strlen($buffers[$key]) >= self::LINE) {
+                    self::emit($key, $buffers[$key], $stdout, $stderr);
+                    $buffers[$key] = '';
                 }
-
-                \proc_terminate($process, 9);
-                \proc_close($process);
-
-                throw new Runtime(
-                    'Command "'.$command[0].'" timed out after '.$timeout.'s',
-                    $command,
-                    $errors,
-                );
             }
         }
 
@@ -176,6 +210,58 @@ final class Process
         } catch (Runtime) {
             return false;
         }
+    }
+
+    /**
+     * Ends a command that cannot be waited on any longer, and describes why.
+     *
+     * Asking it to stop before insisting is the point: a backend given a chance
+     * to exit writes the reason it was unhappy to stderr on the way out, and
+     * closing the pipes first would throw away the only useful part of the
+     * failure. Whatever it manages to say inside the grace period is kept, and
+     * only a process still running afterwards is killed outright.
+     *
+     * @param  resource  $process
+     * @param  array<int, resource>  $open
+     * @param  list<string>  $command
+     */
+    private static function halt(
+        $process,
+        array $open,
+        string $errors,
+        string $message,
+        array $command,
+    ): Runtime {
+        \proc_terminate($process, 15);
+
+        $pipe = $open[2] ?? null;
+        $deadline = \microtime(true) + self::GRACE;
+        $status = \proc_get_status($process);
+
+        while ($status['running'] && \microtime(true) < $deadline) {
+            if ($pipe !== null) {
+                $chunk = \fread($pipe, 8192);
+
+                if (\is_string($chunk) && $chunk !== '') {
+                    $errors = \substr($errors.$chunk, -self::TAIL);
+                }
+            }
+
+            \usleep(20000);
+            $status = \proc_get_status($process);
+        }
+
+        if ($status['running']) {
+            \proc_terminate($process, 9);
+        }
+
+        foreach ($open as $handle) {
+            \fclose($handle);
+        }
+
+        \proc_close($process);
+
+        return new Runtime($message, $command, \trim($errors));
     }
 
     /**

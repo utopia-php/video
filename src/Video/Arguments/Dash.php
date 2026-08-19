@@ -101,7 +101,7 @@ class Dash extends Arguments
         $args[] = '-f';
         $args[] = 'dash';
         $args[] = '-seg_duration';
-        $args[] = self::seconds($dash->duration());
+        $args[] = self::number($dash->duration());
         $args[] = '-use_template';
         $args[] = $dash->templated() ? '1' : '0';
         $args[] = '-use_timeline';
@@ -145,14 +145,5 @@ class Dash extends Arguments
     protected function muxer(): array
     {
         return [];
-    }
-
-    protected static function seconds(float $value): string
-    {
-        if ((float) (int) $value === $value) {
-            return (string) (int) $value;
-        }
-
-        return \rtrim(\rtrim(\sprintf('%.3F', $value), '0'), '.');
     }
 }

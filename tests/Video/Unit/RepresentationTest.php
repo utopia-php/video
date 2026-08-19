@@ -83,4 +83,46 @@ class RepresentationTest extends TestCase
 
         new Representation(1280, 720, 2500, audio: 0);
     }
+
+    /**
+     * The name becomes a filename while a ladder is being staged, so a name that
+     * climbs out of the working directory would write wherever it pointed.
+     *
+     * @testdox A name that leaves the working directory is rejected
+     */
+    public function testRejectsANameThatEscapesTheWorkingDirectory(): void
+    {
+        foreach (['../../outside', 'sub/dir', '/absolute', '..'] as $name) {
+            try {
+                new Representation(1280, 720, 2500, name: $name);
+                $this->fail('expected "'.$name.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a name', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * The muxer is told which rendition is which in a comma separated list of
+     * space separated entries, so a name containing either would be read as the
+     * end of the entry rather than part of the name.
+     */
+    public function testRejectsANameThatWouldBreakTheStreamMap(): void
+    {
+        foreach (['720p,name:evil', 'two words', ''] as $name) {
+            try {
+                new Representation(1280, 720, 2500, name: $name);
+                $this->fail('expected "'.$name.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a name', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testAcceptsTheNamesLaddersActuallyUse(): void
+    {
+        foreach (['720p', 'low', 'audio_eng', 'rung-1', 'HD'] as $name) {
+            $this->assertSame($name, (new Representation(1280, 720, 2500, name: $name))->name);
+        }
+    }
 }

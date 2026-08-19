@@ -1,15 +1,17 @@
 # Utopia Video
 
-[Tests](https://github.com/utopia-php/video/actions/workflows/tests.yml)
-Total Downloads
-[Discord](https://appwrite.io/discord)
+[![Tests](https://github.com/utopia-php/video/actions/workflows/tests.yml/badge.svg)](https://github.com/utopia-php/video/actions/workflows/tests.yml)
+[![Total Downloads](https://img.shields.io/packagist/dt/utopia-php/video.svg)](https://packagist.org/packages/utopia-php/video)
+[![Discord](https://img.shields.io/badge/discord-join-5865F2)](https://appwrite.io/discord)
 
 Utopia framework video library is simple and lite library for probing, encoding and packaging
 video for adaptive streaming. This library is aiming to be as simple and easy to learn and use. This
 library is maintained by the [Appwrite team](https://appwrite.io).
 
 Although this library is part of the [Utopia Framework](https://github.com/utopia-php/framework)
-project it is dependency free, and can be used as standalone with any other PHP project or framework.
+project, it can be used as standalone with any other PHP project or framework. Its only runtime
+dependency is [`utopia-php/console`](https://github.com/utopia-php/console), which prints the status
+line at the end of a job — and even that can be replaced with a `Reporter` of your own.
 
 It takes local files in, writes local files out, and describes what it produced. It does not talk to
 cloud storage, a database, or an HTTP layer — that is the calling application's job.
@@ -76,7 +78,7 @@ use Utopia\Video\Representation;
 
 $package = (new Packager())
     ->open('/path/to/video.mp4')
-    ->format((new X264())->crf(22)->bframes(3)->keyframe(2.0))
+    ->format((new X264())->crf(22)->bframes(3))
     ->add(
         new Representation(width: 640, height: 360, video: 800, audio: 96),
         new Representation(width: 1280, height: 720, video: 2538, audio: 128),
@@ -95,11 +97,22 @@ $package->files();     // everything produced, ready to upload
 playlist tree, so either kind of player downloads the same bytes. Use `Hls` or `Dash` to write just
 one of them.
 
+A segment can only start where a keyframe already is, so packaging forces a keyframe every segment
+unless you ask for something else with `keyframe()`. Nothing has to be kept in step by hand, and a
+keyframe interval longer than a segment — which cannot produce segments of the length asked for — is
+rejected before ffmpeg is called.
+
+Names are checked too. A representation name, an output base name and a sprite sheet name become
+filenames in the directory you named, and a rendition name is also how the muxer is told which
+variant is which, so anything carrying a path separator, a comma or a space is refused with
+`Exception\Input` rather than written somewhere unexpected.
+
 ### Several audio languages
 
-A source with more than one tagged audio track produces one selectable rendition per language, in
-every output — `EXT-X-MEDIA:TYPE=AUDIO` rows for HLS, one `<AdaptationSet>` per language for DASH.
-Video rungs stay switchable alternatives of one another; languages are separate choices.
+Every audio track the source carries comes through as its own selectable rendition — `EXT-X-MEDIA:TYPE=AUDIO`
+rows for HLS, one `<AdaptationSet>` each for DASH. Tagged tracks are labelled with their language;
+untagged ones are still carried, just unlabelled, because a dub without a tag is still a dub. Video
+rungs stay switchable alternatives of one another; languages are separate choices.
 
 ```php
 $package = (new Packager())->open('/path/to/movie.mkv')   // 4 dubs
@@ -179,11 +192,11 @@ Every adapter has a display level, defaulting to `Adapter::ERROR` — only what 
 the interesting output of an encode is the file it wrote, not its commentary. Raise it when
 something needs explaining; whatever the backend then prints arrives as `LOG` events.
 
-Finished **encode / pack / grab / tile** jobs also print a green status line via
-`Utopia\Console::success`, and a failed backend command prints a red line via
-`Console::error` before the exception is thrown. Probe stays quiet on success. `Adapter::QUIET`
-suppresses both status lines as well as `LOG` events; progress events keep firing at every level,
-because progress is structured data rather than commentary.
+Finished **encode / pack / grab / tile** jobs also report a status line — green via
+`Utopia\Console::success`, and red via `Console::error` for a failed backend command before the
+exception is thrown. Probe stays quiet on success. `Adapter::QUIET` suppresses both status lines as
+well as `LOG` events; progress events keep firing at every level, because progress is structured
+data rather than commentary.
 
 ```php
 use Utopia\Video\Adapter;
@@ -197,6 +210,23 @@ $encoder->on(Encoder::LOG, fn (string $line) => error_log($line));
 `Adapter::QUIET`, `ERROR` (default), `WARNING`, `INFO`, `VERBOSE`, `DEBUG` — quietest first, listed
 in `Adapter::LEVELS`. An unrecognised level is rejected when the adapter is constructed, not halfway
 through a job.
+
+### Where status lines go
+
+The terminal, by default. Somewhere that is not a command line — an HTTP worker, a queue consumer, a
+test suite — owns its own logging and would rather the library did not write to stdout behind its
+back, so the destination is a `Reporter`:
+
+```php
+use Utopia\Video\Reporter;
+
+$packager = new Packager(reporter: new Reporter\Silent());       // nothing at all
+$encoder = new Encoder(reporter: new MyPsrLoggerReporter($log)); // two methods to implement
+```
+
+Whichever one a facade is given is handed to every backend it uses, so half a job cannot end up
+printing. `LOG` and `PROGRESS` events are unaffected — those already go wherever your listeners send
+them.
 
 A backend defines its own default with a `LEVEL` constant, the same way it declares its `NAME`,
 `BINARY` and `TIMEOUT`, and `level()` reports whichever level it ended up with.
@@ -271,7 +301,7 @@ We use the [Utopia Framework](https://github.com/utopia-php/framework) contribut
 
 ## System Requirements
 
-Utopia Video requires PHP 8.1 or later, `ffmpeg` with `ffprobe` on the `PATH`, and
+Utopia Video requires PHP 8.2 or later, `ffmpeg` with `ffprobe` on the `PATH`, and
 [`utopia-php/console`](https://github.com/utopia-php/console) for status lines. The unit suite runs
 without either binary.
 

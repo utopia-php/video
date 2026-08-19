@@ -32,7 +32,7 @@ final class Hls extends Arguments
         $args[] = '-f';
         $args[] = 'hls';
         $args[] = '-hls_time';
-        $args[] = self::seconds($hls->duration());
+        $args[] = self::number($hls->duration());
         $args[] = '-hls_list_size';
         $args[] = '0';
         $args[] = '-hls_playlist_type';
@@ -108,14 +108,5 @@ final class Hls extends Arguments
         }
 
         return \implode(' ', $entries);
-    }
-
-    private static function seconds(float $value): string
-    {
-        if ((float) (int) $value === $value) {
-            return (string) (int) $value;
-        }
-
-        return \rtrim(\rtrim(\sprintf('%.3F', $value), '0'), '.');
     }
 }

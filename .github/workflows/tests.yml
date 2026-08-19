@@ -1,6 +1,11 @@
 name: "Tests"
 
-on: [ pull_request ]
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
 jobs:
   tests:
     name: Tests
@@ -8,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php-versions: [ '8.1', '8.2', '8.3' ]
+        php-versions: [ '8.2', '8.3', '8.4' ]
 
     steps:
       - name: Checkout repository
@@ -21,7 +26,21 @@ jobs:
           export PHP_VERSION=${{ matrix.php-versions }}
           docker compose build
           docker compose up -d
-          sleep 5
+
+      # The container is ready when PHP and both binaries answer, which is a
+      # question worth asking rather than a wait worth guessing at.
+      - name: Wait for the container
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T tests sh -c 'php -v && ffmpeg -version && ffprobe -version' >/dev/null 2>&1; then
+              echo "ready after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "the test container never became ready"
+          docker compose logs
+          exit 1
 
       - name: Run Unit Tests
         run: docker compose exec -T tests vendor/bin/phpunit --configuration phpunit.xml --testsuite unit

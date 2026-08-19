@@ -86,7 +86,18 @@ final class Mpd
             $type = $contentType === 'audio' ? Track::AUDIO : Track::VIDEO;
         }
 
-        [$segments, $timescale, $start] = self::segments($set, $representation, $id, $dir, $duration);
+        // Segment names can be described by a formula that includes the
+        // bandwidth, so it has to be known before they can be resolved.
+        $bandwidth = (int) $representation->getAttribute('bandwidth');
+
+        [$segments, $timescale, $start] = self::segments(
+            $set,
+            $representation,
+            $id,
+            $dir,
+            $duration,
+            $bandwidth,
+        );
 
         $language = $set->getAttribute('lang');
 
@@ -95,7 +106,7 @@ final class Mpd
             type: $type,
             mimeType: $mime !== '' ? $mime : null,
             codecs: self::text($representation->getAttribute('codecs')),
-            bandwidth: (int) $representation->getAttribute('bandwidth'),
+            bandwidth: $bandwidth,
             width: self::number($representation, $set, 'width'),
             height: self::number($representation, $set, 'height'),
             sar: self::text($representation->getAttribute('sar')),
@@ -117,6 +128,7 @@ final class Mpd
         string $id,
         string $dir,
         float $duration,
+        int $bandwidth,
     ): array {
         $list = self::child($representation, 'SegmentList') ?? self::child($set, 'SegmentList');
 
@@ -127,7 +139,7 @@ final class Mpd
         $template = self::child($representation, 'SegmentTemplate') ?? self::child($set, 'SegmentTemplate');
 
         if ($template !== null) {
-            return self::templated($template, $id, $dir, $duration);
+            return self::templated($template, $id, $dir, $duration, $bandwidth);
         }
 
         return [[], 0, 0];
@@ -173,8 +185,13 @@ final class Mpd
      *
      * @return array{0: list<Segment>, 1: int, 2: int}
      */
-    private static function templated(DOMElement $template, string $id, string $dir, float $duration): array
-    {
+    private static function templated(
+        DOMElement $template,
+        string $id,
+        string $dir,
+        float $duration,
+        int $bandwidth,
+    ): array {
         $timescale = (int) $template->getAttribute('timescale');
         $timescale = $timescale > 0 ? $timescale : 1;
         $start = $template->hasAttribute('startNumber')
@@ -185,7 +202,7 @@ final class Mpd
         $init = $template->getAttribute('initialization');
 
         if ($init !== '') {
-            $segments[] = self::segment($id, $dir, self::expand($init, $id, 0), 0.0, true, 0);
+            $segments[] = self::segment($id, $dir, self::expand($init, $id, 0, $bandwidth), 0.0, true, 0);
         }
 
         $timeline = self::child($template, 'SegmentTimeline');
@@ -206,7 +223,7 @@ final class Mpd
                     $segments[] = self::segment(
                         $id,
                         $dir,
-                        self::expand($media, $id, $number),
+                        self::expand($media, $id, $number, $bandwidth),
                         $length,
                         false,
                         $number,
@@ -231,7 +248,7 @@ final class Mpd
             $segments[] = self::segment(
                 $id,
                 $dir,
-                self::expand($media, $id, $number),
+                self::expand($media, $id, $number, $bandwidth),
                 $length,
                 false,
                 $number,
@@ -243,18 +260,24 @@ final class Mpd
 
     /**
      * Substitutes the identifiers DASH allows inside a segment name.
+     *
+     * $Number$ and $Bandwidth$ both take an optional printf width, which is how
+     * a manifest asks for zero padded names, and $$ is how it asks for a literal
+     * dollar sign.
      */
-    public static function expand(string $pattern, string $id, int $number): string
+    public static function expand(string $pattern, string $id, int $number, int $bandwidth = 0): string
     {
-        $name = \str_replace(['$RepresentationID$', '$Bandwidth$'], [$id, ''], $pattern);
+        $name = \str_replace('$RepresentationID$', $id, $pattern);
 
-        $name = \preg_replace_callback(
-            '/\$Number(%0?\d*d)?\$/',
-            static fn (array $match): string => isset($match[1]) && $match[1] !== ''
-                ? \sprintf($match[1], $number)
-                : (string) $number,
-            $name,
-        ) ?? $name;
+        foreach (['Number' => $number, 'Bandwidth' => $bandwidth] as $identifier => $value) {
+            $name = \preg_replace_callback(
+                '/\$'.$identifier.'(%0?\d*d)?\$/',
+                static fn (array $match): string => isset($match[1]) && $match[1] !== ''
+                    ? \sprintf($match[1], $value)
+                    : (string) $value,
+                $name,
+            ) ?? $name;
+        }
 
         return \str_replace('$$', '$', $name);
     }

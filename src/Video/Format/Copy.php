@@ -32,7 +32,7 @@ final class Copy extends Format
     /**
      * Quality knobs are meaningless without an encoder, so they are ignored.
      */
-    public function build(bool $video = true, bool $audio = true): array
+    public function build(bool $video = true, bool $audio = true, ?float $cadence = null): array
     {
         $args = [];
 

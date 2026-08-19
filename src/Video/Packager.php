@@ -57,10 +57,15 @@ class Packager
     /** @var array<string, list<callable>> */
     protected array $listeners = [];
 
+    /**
+     * @param  Reporter|null  $reporter  Where status lines go; null keeps them on
+     *                                   the terminal.
+     */
     public function __construct(
         ?PackagerAdapter $adapter = null,
         ?EncoderAdapter $encoder = null,
         ?Probe $probe = null,
+        ?Reporter $reporter = null,
     ) {
         $this->prober = $probe ?? new FFprobe();
         $this->adapter = $adapter ?? new FFmpeg();
@@ -77,6 +82,10 @@ class Packager
         foreach ([$this->adapter, $this->encoder] as $backend) {
             if ($backend instanceof Adapter) {
                 $backend->setProbe($this->prober);
+
+                if ($reporter !== null) {
+                    $backend->setReporter($reporter);
+                }
             }
         }
     }

@@ -24,7 +24,9 @@ Boundaries — the library:
   writes **local output artifacts**, returns **structured results**;
 - does not touch cloud storage, databases, HTTP, auth, queues, DRM, or live streaming
   (live is deliberately out of v2, but the API reserves clean seams for adding it later — see §11);
-- depends on [`utopia-php/console`](https://github.com/utopia-php/console) for status lines; backends are external binaries.
+- depends on [`utopia-php/console`](https://github.com/utopia-php/console) for status lines, behind a
+  `Reporter` seam so a caller that does not own stdout can redirect or silence them; backends are
+  external binaries.
 
 Style: one-word public methods (`open`, `probe`, `encode`, `pack`, `grab`, `tile`, `valid`),
 short class names with no redundant context (`Encoder\FFmpeg`, not `FFmpegEncoderAdapter`),
@@ -163,10 +165,9 @@ interface Encoder extends Named, Observable
     public function encode(string $path): string;          // exactly one output file
 
     // Stills live here rather than in an interface of their own: they are the same
-    // work (decode the source, write a picture), anything that can encode can grab
-    // a frame, and PHP 8.1 has no nullable intersection type — `?(Encoder&Frame)`
-    // needs 8.2 DNF — so a separate interface would make them unrequestable from
-    // one optional constructor argument.
+    // work (decode the source, write a picture), and anything that can encode can
+    // grab a frame, so splitting them out would only make a caller ask for two
+    // capabilities where one will do.
     public function grab(string $path, string $output, ?Thumb $options = null): string;
     public function tile(string $path, string $dir, ?Tile $options = null): Spritesheet;
 }
@@ -261,7 +262,9 @@ which is how a backend chosen from config stays identifiable.
 // Representation — readonly value object, named-args friendly; no collection class, add() is variadic
 new Representation(width: 1280, height: 720, video: 2538, audio: 128, name: '720p',
                    maxrate: null, bufsize: null);
-// name defaults to "{height}p" and drives artifact naming.
+// name defaults to "{height}p" and drives artifact naming, so it is restricted to letters, digits,
+// underscores and hyphens: it becomes a filename, and it identifies the rendition to the muxer in a
+// list where a comma or a space would end the entry. Anything else throws Exception\Input.
 // Capped CRF by default: when unset, maxrate = video (hard bitrate ceiling, -maxrate:v:N) and
 // bufsize = 2 × video (the smoothing window, -bufsize:v:N) — busy scenes can no longer spike
 // above the advertised rendition bitrate and stall constrained viewers.
@@ -272,6 +275,9 @@ abstract class Format
     public function crf(int $crf): static;             // -crf
     public function bframes(int $count): static;       // -bf
     public function keyframe(float $seconds): static;  // -force_key_frames expr:gte(t,n_forced*S)
+                                                      // unset ⇒ packaging uses the segment length,
+                                                      // and an interval longer than a segment is
+                                                      // rejected with Exception\Unsupported
     public function audio(string $codec): static;      // override audio codec
     public function params(array $params): static;     // raw argv escape hatch (e.g. -dn -sn -vf …)
 }
@@ -299,10 +305,11 @@ Output\Cmaf ->master('master.m3u8')->manifest('manifest.mpd')
             ->grid(5, 5)->quality(3)->name('sprite')->vtt(true);
 ```
 
-Multi-audio sources: audio streams carrying a language tag become separate audio tracks in the
-package (HLS `var_stream_map` audio group / DASH audio adaptation set), with the first flagged as
-default — mirroring the proven v1 tag-based detection. Explicit track selection/ordering can be
-added to `Output` later without breaking anything.
+Multi-audio sources: every audio stream becomes a separate audio track in the package (HLS
+`var_stream_map` audio group / DASH audio adaptation set), with the first flagged as default. A
+language tag is what labels a track, not what qualifies it — untagged streams are carried unlabelled
+rather than dropped, since a source with four untagged dubs still has four. Explicit track
+selection/ordering can be added to `Output` later without breaking anything.
 
 ### Result objects (all readonly)
 
@@ -421,7 +428,8 @@ referencing one shared `.m4s` segment set):
   keyframe the guarantee genuinely holds, so `pack()` post-appends the tag to the CMAF master —
   faster quality switching in players and clean Apple validation for one line of string editing.
 - Requires ffmpeg ≥ 4.1. The library targets the most mature LTS line — **7.1**, exactly what the
-  repo image builds and pins — and keeps 5.x in CI as the supported floor.
+  repo image builds and pins, and what CI therefore tests against. 4.1 remains the documented floor;
+  older lines are not exercised by CI.
 
 Why FFmpeg is the default, and why Shaka is deferred: one ffmpeg process does encode+package (no
 intermediate files), progress reporting exists, `SegmentList` MPDs are supported, and ffmpeg is
@@ -524,8 +532,9 @@ Exception names avoid colliding with the config and runner classes they sat besi
 `Exception\Runtime` (was `Process`, which clashed with the process runner). That removed a forced
 `as` alias from 15 files.
 
-`composer.json`: `"require": {"php": "^8.1", "ext-dom": "*", "ext-json": "*"}`, and nothing else at
-runtime — `ffmpeg`/`ffprobe` are external binaries. The `php-ffmpeg/php-ffmpeg` dependency is
+`composer.json`: `"require": {"php": ">=8.2", "ext-dom": "*", "ext-json": "*",
+"utopia-php/console": "^0.2"}` — `ffmpeg`/`ffprobe` are external binaries, and console only prints the
+status line, behind the `Reporter` seam. The `php-ffmpeg/php-ffmpeg` dependency is
 dropped —
 v1 already bypassed its command model, and it was the root of the vendor-type leaks (`Format`
 extending `DefaultVideo`, `Probe` exposing `StreamCollection`) and the duration-less progress
@@ -556,13 +565,14 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
 
 **Unit — no binaries required**
 
-- `Arguments\{Hls,Dash,Cmaf}`: exact argv golden tests — multi-rep single-command shape (the v1
-  regression), SegmentList vs SegmentTemplate flags, fMP4 flag set (`independent_segments`, no
-  `allow_cache`), audio-only inputs dropping all video args, `Format\Copy` remux, capped-CRF
+- `Arguments\{Hls,Dash,Cmaf}`: argv assertions on the built command — multi-rep single-command shape
+  (the v1 regression), SegmentList vs SegmentTemplate flags, fMP4 flag set (`independent_segments`,
+  no `allow_cache`), audio-only inputs dropping all video args, `Format\Copy` remux, capped-CRF
   defaults (`-maxrate:v:N`/`-bufsize:v:N` derived when unset), multi-audio `var_stream_map` built
-  from language tags.
+  from language tags with untagged tracks still carried, and the keyframe cadence falling back to the
+  segment length (with an interval longer than a segment rejected).
 - `Parser\{M3u8,Mpd}` on fixture manifests: TS + fMP4 (`EXT-X-MAP`) playlists, `SegmentList` MPDs,
-  `SegmentTemplate` expansion (`$Number%05d$`, `SegmentTimeline` `S@t/@d/@r` runs).
+  `SegmentTemplate` expansion (`$Number%05d$`, `$Bandwidth$`, `SegmentTimeline` `S@t/@d/@r` runs).
 - Probe JSON fixtures (ffprobe payloads): every `Info` field incl. `tags`, `chapters`, `tracks`
   (multi-track with embedded subtitles), `rotation`, `cover`, audio-only, missing-field defaults.
 - The facades against fakes: `Encoder` delegation, `Packager`'s fused-vs-staged choice, staged
@@ -575,8 +585,13 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
 - Config validation: `Representation` bounds, `Format` knobs, unsupported `Output` combos throwing
   `Exception\Unsupported` — including a mixed-aspect ladder for DASH/CMAF, whose message names the
   offending rungs (the muxer says only "Conflicting stream aspect ratios", after it has started).
-- `Process`: fake scripts exercising exit codes, timeouts, stdout/stderr line callbacks,
-  progress-block parsing.
+- `Process`: fake scripts exercising exit codes, timeouts (including the stderr tail surviving the
+  termination that ends them), stdout/stderr line callbacks, progress-block parsing, and a stream
+  that never sends a line break.
+- Names that would leave the directory they were given or break the argument they sit in
+  (`Representation`, `Output::name()`, manifest and playlist filenames, `Tile::name()`).
+- Status lines: reported through a `Reporter`, the terminal by default, whichever one a facade is
+  given reaching every backend, and a quiet backend reporting nothing.
 - Display level: every backend starts at `ERROR`; a level can be raised or silenced; the factories
   pass it through and omitting it keeps each backend's default; an unrecognised level is rejected at
   construction; the level reaches the built command; a quiet backend still reports progress.
@@ -609,7 +624,8 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
 audio-only, embedded artwork) put through probe, grab, tile and packaging, with results left in
 `tests/samples/out`. Built by `composer samples`, gitignored rather than committed.
 
-**Parity** — golden argv comparison against the captured legacy production command shape.
+**Parity** — the argv assertions above are written against the captured legacy production command
+shape, so a rung, flag or map that v1 emitted cannot quietly disappear.
 
 Every test prints one line naming what it checks and whether it passed — PHPUnit's testdox output,
 enabled in `phpunit.xml` so it applies to every run rather than needing a flag. Method names are
@@ -617,8 +633,9 @@ written to read as sentences; where a name cannot (a leading acronym, or a digit
 as in `Mp4` → "Mp 4"), a `@testdox` annotation supplies the wording instead. A run therefore reads as
 a description of what the library does.
 
-CI: GitHub Actions matrix (PHP 8.1/8.3 × ffmpeg 5.x floor / 7.1 LTS target), phpstan at level **max**
-over `src` and `tests`, pint (`psr12`).
+CI: GitHub Actions matrix (PHP 8.2/8.3/8.4 against the pinned ffmpeg 7.1.1 the image builds), phpstan
+at level **max** over `src` and `tests`, pint (`psr12`). All three run on pull requests and on pushes
+to `main`.
 The repo Dockerfile builds ffmpeg **from source**, pinned via the `FFMPEG_VERSION` build arg
 (GPL, with libx264/x265/vpx/opus/lame/theora/vorbis — exactly the `Format` presets and the sample
 library's codecs), in a stage that shares the runtime base image so codec shared libraries match
@@ -676,10 +693,10 @@ All former open questions, resolved with the maintainer (2026-07-26):
    auto-derived (`maxrate = video`, `bufsize = 2 × video`) when unset (§2).
 5. **`EXT-X-INDEPENDENT-SEGMENTS`**: post-appended to CMAF masters (§4) — the guarantee genuinely
    holds and the edit costs one line.
-6. **Multi-audio**: mirror v1's tag-based detection — audio streams with a language tag become
-   tracks, first one is default (§2); explicit selection is a later additive option.
+6. **Multi-audio**: every audio stream becomes a track, labelled with its language tag where it has
+   one, first one is default (§2); explicit selection is a later additive option.
 7. **ffmpeg version**: target the most mature LTS line — 7.1, pinned in the repo image via the
-   `FFMPEG_VERSION` build arg; 5.x remains the documented and CI-covered floor.
+   `FFMPEG_VERSION` build arg, and the only line CI builds against; 4.1 is the documented floor.
 8. **`Adapter\Shaka`**: deferred to a later release rather than shipped as a stub — an untested
    adapter for an absent binary is a liability, and DRM (the reason Shaka exists here) is out of
    scope. What ships instead is the *seam*: the staged route, exercised by a pure-packager fake, so
@@ -694,6 +711,19 @@ All former open questions, resolved with the maintainer (2026-07-26):
    (§9a) — reporting and packaging are different jobs.
 9. **Batch stills**: `grab()` stays one-frame-per-call; a `Thumb::count(n)` single-pass mode is
    added only if looping proves a hot path.
+12. **Status lines behind a `Reporter`**: printing suits a command line and nothing else, so the
+   destination is an interface — `Reporter\Console` by default, `Reporter\Silent` for anywhere stdout
+   belongs to something else, and two methods for anyone bridging to a PSR-3 logger. Handed to
+   backends by the facades the same way the probe is, so one job cannot report from half of itself.
+   The display level still decides *whether* a line is reported; this decides only where it goes.
+13. **Names are validated, not trusted**: a representation, output, manifest or sprite name becomes a
+   filename in a directory the caller named and, for renditions, an entry in `-var_stream_map`. Both
+   uses break on separators, commas and spaces, so they are rejected at construction with
+   `Exception\Input` rather than joined onto a path and hoped for.
+14. **Keyframes follow segments**: a packaging job without an explicit `keyframe()` takes the segment
+   length as its cadence, and an interval longer than a segment is rejected. Cuts land on keyframes,
+   so the two were never independent — leaving them so meant a ladder built with the defaults could
+   be segmented wherever the encoder happened to place a keyframe.
 
 ## 11. Future: live streaming
 

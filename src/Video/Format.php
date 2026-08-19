@@ -9,12 +9,15 @@ namespace Utopia\Video;
  * be packaged at all.
  *
  * Keyframe placement is the important one: segments can only be cut where a
- * keyframe already exists, so callers force them on a fixed cadence. Bitrate
- * deliberately lives on the representation instead, because it varies per rung
- * while the codec choice does not.
+ * keyframe already exists, so they are forced on a fixed cadence. A packaging
+ * job that was not told which cadence to use takes the segment length, so the
+ * two cannot silently disagree. Bitrate deliberately lives on the representation
+ * instead, because it varies per rung while the codec choice does not.
  */
 abstract class Format
 {
+    use Decimal;
+
     protected string $video;
 
     protected string $audio;
@@ -93,6 +96,10 @@ abstract class Format
 
     /**
      * Force a keyframe every N seconds so segments can be cut cleanly.
+     *
+     * Packaging derives this from the segment length when it is left unset, so
+     * it only needs setting to ask for something other than one keyframe per
+     * segment.
      */
     public function keyframe(float $seconds): static
     {
@@ -121,9 +128,13 @@ abstract class Format
     /**
      * Codec arguments for one job, without any stream index suffix.
      *
+     * @param  float|null  $cadence  Keyframe interval to fall back on when none
+     *                               was configured. Packaging passes the segment
+     *                               length, because segments can only be cut
+     *                               where a keyframe already is.
      * @return list<string>
      */
-    public function build(bool $video = true, bool $audio = true): array
+    public function build(bool $video = true, bool $audio = true, ?float $cadence = null): array
     {
         $args = [];
 
@@ -152,9 +163,11 @@ abstract class Format
                 $args[] = (string) $this->bframes;
             }
 
-            if ($this->keyframe !== null) {
+            $keyframe = $this->keyframe ?? $cadence;
+
+            if ($keyframe !== null) {
                 $args[] = '-force_key_frames';
-                $args[] = 'expr:gte(t,n_forced*'.self::number($this->keyframe).')';
+                $args[] = 'expr:gte(t,n_forced*'.self::number($keyframe).')';
             }
         }
 
@@ -163,14 +176,5 @@ abstract class Format
         }
 
         return $args;
-    }
-
-    protected static function number(float $value): string
-    {
-        if ((float) (int) $value === $value) {
-            return (string) (int) $value;
-        }
-
-        return \rtrim(\rtrim(\sprintf('%.3F', $value), '0'), '.');
     }
 }

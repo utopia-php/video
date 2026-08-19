@@ -13,6 +13,8 @@ namespace Utopia\Video;
  */
 abstract class Output
 {
+    use Decimal;
+
     public const HLS = 'hls';
 
     public const DASH = 'dash';
@@ -61,7 +63,7 @@ abstract class Output
      */
     public function name(string $base): static
     {
-        $this->name = $base;
+        $this->name = Name::label($base, 'Output name');
 
         return $this;
     }
@@ -99,14 +101,5 @@ abstract class Output
     public function extra(): array
     {
         return $this->params;
-    }
-
-    protected static function number(float $value): string
-    {
-        if ((float) (int) $value === $value) {
-            return (string) (int) $value;
-        }
-
-        return \rtrim(\rtrim(\sprintf('%.3F', $value), '0'), '.');
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Video\Output;
 
+use Utopia\Video\Name;
 use Utopia\Video\Output;
 
 /**
@@ -55,7 +56,7 @@ class Dash extends Output
 
     public function manifest(string $filename): static
     {
-        $this->manifest = $filename;
+        $this->manifest = Name::file($filename, 'Manifest');
 
         return $this;
     }

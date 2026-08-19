@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
       args:
         TESTING: "true"
-        PHP_VERSION: ${PHP_VERSION:-8.1}
+        PHP_VERSION: ${PHP_VERSION:-8.2}
     volumes:
       - ./src:/usr/src/code/src
       - ./tests:/usr/src/code/tests

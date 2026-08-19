@@ -21,6 +21,7 @@ use Utopia\Video\Exception\Unsupported;
 use Utopia\Video\Info;
 use Utopia\Video\Output\Hls;
 use Utopia\Video\Packager;
+use Utopia\Video\Reporter;
 use Utopia\Video\Representation;
 
 class AdapterTest extends TestCase
@@ -323,98 +324,120 @@ class AdapterTest extends TestCase
     }
 
     /**
-     * Finished jobs print a status line unless the backend was told to stay quiet.
+     * Finished jobs report a status line unless the backend was told to stay quiet.
      */
     public function testStatusLinesFollowTheDisplayLevel(): void
     {
-        $quiet = new class (level: Adapter::QUIET) extends Mock {
-            /** @var list<bool> */
-            public array $printed = [];
+        $reporter = new Recorder();
 
-            protected function reportSuccess(string $message): bool
-            {
-                return $this->printed[] = parent::reportSuccess($message);
-            }
-        };
-
+        $quiet = new Mock(level: Adapter::QUIET);
+        $quiet->setReporter($reporter);
         $quiet->open($this->file)->encode($this->dir.'/quiet-status.mp4');
 
-        $this->assertSame([false], $quiet->printed);
-
-        $loud = new class () extends Mock {
-            /** @var list<bool> */
-            public array $printed = [];
-
-            /** @var list<string> */
-            public array $messages = [];
-
-            protected function reportSuccess(string $message): bool
-            {
-                $this->messages[] = $message;
-
-                return $this->printed[] = parent::reportSuccess($message);
-            }
-        };
+        $this->assertSame([], $reporter->successes, 'a quiet backend should say nothing');
 
         $path = $this->dir.'/loud-status.mp4';
+        $loud = new Mock();
+        $loud->setReporter($reporter);
         $loud->open($this->file)->encode($path);
 
-        $this->assertSame([true], $loud->printed);
-        $this->assertSame(['mock: encoded '.$path], $loud->messages);
+        $this->assertSame(['mock: encoded '.$path], $reporter->successes);
     }
 
     /**
-     * A failed backend command prints before the exception leaves.
+     * A failed backend command says so before the exception leaves.
      */
     public function testAFailedCommandReportsAnError(): void
     {
+        $reporter = new Recorder();
+
         $adapter = new class () extends FFmpeg {
-            /** @var list<string> */
-            public array $errors = [];
-
-            protected function reportError(string $message): bool
-            {
-                $this->errors[] = $message;
-
-                return parent::reportError($message);
-            }
-
             public function fail(): void
             {
                 $this->process(['false']);
             }
         };
+
+        $adapter->setReporter($reporter);
 
         try {
             $adapter->fail();
             $this->fail('a failing command should throw');
         } catch (Runtime $e) {
-            $this->assertNotSame([], $adapter->errors);
-            $this->assertStringContainsString('failed with exit code', $adapter->errors[0]);
-            $this->assertSame($adapter->errors[0], $e->getMessage());
+            $this->assertCount(1, $reporter->errors);
+            $this->assertStringContainsString('failed with exit code', $reporter->errors[0]);
+            $this->assertSame($reporter->errors[0], $e->getMessage());
         }
 
         $quiet = new class (level: Adapter::QUIET) extends FFmpeg {
-            /** @var list<bool> */
-            public array $printed = [];
-
-            protected function reportError(string $message): bool
-            {
-                return $this->printed[] = parent::reportError($message);
-            }
-
             public function fail(): void
             {
                 $this->process(['false']);
             }
         };
 
+        $quiet->setReporter($reporter);
+
         try {
             $quiet->fail();
             $this->fail('a failing command should throw');
         } catch (Runtime) {
-            $this->assertSame([false], $quiet->printed);
+            $this->assertCount(1, $reporter->errors, 'a quiet backend should say nothing');
         }
+    }
+
+    /**
+     * Status lines go on the terminal unless told otherwise, because that is
+     * what a command line caller wants and it costs everyone else one argument
+     * to redirect.
+     */
+    public function testStatusLinesGoToTheTerminalByDefault(): void
+    {
+        $adapter = new class () extends Mock {
+            public function destination(): Reporter
+            {
+                return $this->reporter();
+            }
+        };
+
+        $this->assertInstanceOf(Reporter\Console::class, $adapter->destination());
+
+        // And a facade told to keep quiet replaces it before anything runs.
+        new Encoder(adapter: $adapter, probe: $adapter, reporter: new Reporter\Silent());
+
+        $this->assertInstanceOf(Reporter\Silent::class, $adapter->destination());
+    }
+
+    /**
+     * A worker that does not own stdout hands over somewhere else to report to,
+     * and the facade gives it to every backend so half a job cannot end up
+     * printing.
+     */
+    public function testTheReporterGivenToAFacadeIsTheOneBackendsUse(): void
+    {
+        $reporter = new Recorder();
+        $mock = new Mock();
+
+        $package = (new Packager(adapter: $mock, probe: $mock, reporter: $reporter))
+            ->open($this->file)
+            ->add(new Representation(1280, 720, 2538))
+            ->output(new Hls())
+            ->pack($this->dir.'/reported');
+
+        $this->assertNotSame([], $package->variants());
+        $this->assertSame(['mock: packed '.$this->dir.'/reported'], $reporter->successes);
+
+        $encoded = $this->dir.'/reported.mp4';
+        $silent = new Mock();
+
+        (new Encoder(adapter: $silent, probe: $silent, reporter: $reporter))
+            ->open($this->file)
+            ->encode($encoded);
+
+        $this->assertSame(
+            ['mock: packed '.$this->dir.'/reported', 'mock: encoded '.$encoded],
+            $reporter->successes,
+        );
     }
 
     public function testAnUnknownNameIsRejected(): void

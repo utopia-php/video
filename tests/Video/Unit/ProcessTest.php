@@ -98,9 +98,46 @@ class ProcessTest extends TestCase
             $this->fail('Expected the command to time out');
         } catch (Runtime $exception) {
             $this->assertStringContainsString('timed out', $exception->getMessage());
+            $this->assertSame('sleep', $exception->command()[0]);
         }
 
         $this->assertLessThan(10, \microtime(true) - $started);
+    }
+
+    /**
+     * A command that has to be stopped is the one most in need of explaining, so
+     * whatever it complained about on the way out is kept rather than discarded
+     * along with its pipes.
+     */
+    public function testATimedOutCommandKeepsItsComplaint(): void
+    {
+        try {
+            Process::run(['sh', '-c', 'echo "half way in" 1>&2; sleep 30'], timeout: 1);
+            $this->fail('Expected the command to time out');
+        } catch (Runtime $exception) {
+            $this->assertStringContainsString('timed out', $exception->getMessage());
+            $this->assertStringContainsString('half way in', $exception->output());
+        }
+    }
+
+    /**
+     * Nothing obliges a stream to send line breaks, and a backend writing
+     * something binary never will, so the buffer is handed over once it has
+     * grown past a plausible line rather than held until the command ends.
+     */
+    public function testAnEndlessLineIsNotBufferedForever(): void
+    {
+        $lines = [];
+
+        Process::run(
+            ['sh', '-c', 'printf "%0200000d" 1'],
+            function (string $line) use (&$lines): void {
+                $lines[] = $line;
+            },
+        );
+
+        $this->assertGreaterThan(1, \count($lines), 'one unbroken line should arrive in pieces');
+        $this->assertSame(200000, \array_sum(\array_map('strlen', $lines)));
     }
 
     public function testMissingBinaryIsAFailure(): void

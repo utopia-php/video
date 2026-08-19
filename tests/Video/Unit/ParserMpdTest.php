@@ -66,6 +66,61 @@ class ParserMpdTest extends TestCase
         );
     }
 
+    /**
+     * A manifest is free to address its segments by bitrate instead of by id,
+     * and a reader that dropped the identifier would look for the wrong file.
+     */
+    public function testExpandsTheBandwidthIdentifier(): void
+    {
+        $this->assertSame(
+            'chunk-2538000-4.m4s',
+            Mpd::expand('chunk-$Bandwidth$-$Number$.m4s', '0', 4, 2538000),
+        );
+
+        $this->assertSame(
+            'seg-0002538000.m4s',
+            Mpd::expand('seg-$Bandwidth%010d$.m4s', '0', 1, 2538000),
+        );
+    }
+
+    /**
+     * @testdox A literal dollar sign survives expansion
+     */
+    public function testLiteralDollarSignSurvives(): void
+    {
+        $this->assertSame('odd$name-3.m4s', Mpd::expand('odd$$name-$Number$.m4s', '0', 3, 800));
+    }
+
+    public function testReadsATemplatedManifestAddressedByBandwidth(): void
+    {
+        $this->write('init-800000.m4s', 'init');
+        $this->write('chunk-800000-00001.m4s', 'a');
+        $this->write('chunk-800000-00002.m4s', 'b');
+
+        $manifest = $this->write('manifest.mpd', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT10.0S">
+              <Period>
+                <AdaptationSet id="0" contentType="video">
+                  <Representation id="0" mimeType="video/mp4" bandwidth="800000">
+                    <SegmentTemplate timescale="1000" duration="6000" startNumber="1"
+                                     initialization="init-$Bandwidth$.m4s"
+                                     media="chunk-$Bandwidth$-$Number%05d$.m4s"/>
+                  </Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            XML);
+
+        $variant = Mpd::read($manifest, $this->dir)['variants'][0];
+
+        $this->assertSame(800000, $variant->bandwidth);
+        $this->assertCount(3, $variant->segments);
+        $this->assertSame('init-800000.m4s', $variant->segments[0]->file);
+        $this->assertSame('chunk-800000-00001.m4s', $variant->segments[1]->file);
+        $this->assertSame('chunk-800000-00002.m4s', $variant->segments[2]->file);
+    }
+
     public function testReadsAListedManifest(): void
     {
         $this->write('init-0.m4s', 'init');

@@ -151,6 +151,32 @@ class ArgumentsDashTest extends TestCase
         );
     }
 
+    /**
+     * Untagged tracks are alternatives of nothing in particular, but they are
+     * still separate tracks, so each needs a set of its own the same way a
+     * language does.
+     */
+    public function testUntaggedTracksAlsoGetOneAdaptationSetEach(): void
+    {
+        $info = new Info(
+            duration: 60.0,
+            format: 'matroska',
+            hasVideo: true,
+            hasAudio: true,
+            width: 1920,
+            height: 1080,
+            audioTracks: [
+                ['codec' => 'aac', 'language' => 'und'],
+                ['codec' => 'aac', 'language' => 'und'],
+            ],
+        );
+
+        $argv = $this->build($info, [new Representation(1280, 720, 2538)]);
+
+        $this->assertSame(2, \substr_count($argv, '-map 0:a:'));
+        $this->assertStringContainsString('-adaptation_sets id=0,streams=v id=1,streams=1 id=2,streams=2', $argv);
+    }
+
     public function testAdaptationSetsCanStillBeOverridden(): void
     {
         $argv = $this->build(
