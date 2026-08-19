@@ -13,6 +13,10 @@ namespace Utopia\Video;
  * job that was not told which cadence to use takes the segment length, so the
  * two cannot silently disagree. Bitrate deliberately lives on the representation
  * instead, because it varies per rung while the codec choice does not.
+ *
+ * Immutable: every setter returns a modified copy and leaves the receiver
+ * untouched, so one instance can be shared across jobs — and across coroutines
+ * — without one caller's settings bleeding into another's.
  */
 abstract class Format
 {
@@ -79,9 +83,10 @@ abstract class Format
      */
     public function crf(int $crf): static
     {
-        $this->crf = $crf;
+        $copy = clone $this;
+        $copy->crf = $crf;
 
-        return $this;
+        return $copy;
     }
 
     /**
@@ -89,9 +94,10 @@ abstract class Format
      */
     public function bframes(int $count): static
     {
-        $this->bframes = $count;
+        $copy = clone $this;
+        $copy->bframes = $count;
 
-        return $this;
+        return $copy;
     }
 
     /**
@@ -103,9 +109,10 @@ abstract class Format
      */
     public function keyframe(float $seconds): static
     {
-        $this->keyframe = $seconds;
+        $copy = clone $this;
+        $copy->keyframe = $seconds;
 
-        return $this;
+        return $copy;
     }
 
     /**
@@ -115,9 +122,10 @@ abstract class Format
      */
     public function params(array $params): static
     {
-        $this->params = $params;
+        $copy = clone $this;
+        $copy->params = $params;
 
-        return $this;
+        return $copy;
     }
 
     public function interval(): ?float

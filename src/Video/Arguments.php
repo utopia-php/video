@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Utopia\Video;
 
+use Utopia\Video\Exception\Input;
 use Utopia\Video\Exception\Unsupported;
+use Utopia\Video\Format\Copy;
 
 /**
  * Builds the ffmpeg arguments for one packaging job.
@@ -37,10 +39,27 @@ abstract class Arguments
             throw new Unsupported('At least one representation is required');
         }
 
+        $names = [];
+
+        foreach ($reps as $rep) {
+            if (isset($names[$rep->name])) {
+                throw new Input('Representation name "'.$rep->name.'" is used more than once');
+            }
+
+            $names[$rep->name] = true;
+        }
+
         if (! \in_array($output->type(), $format->supports(), true)) {
             throw new Unsupported(
                 \strtoupper($output->type()).' cannot carry '.$format->codec()
                 .'; supported: '.\implode(', ', $format->supports()),
+            );
+        }
+
+        if ($format instanceof Copy) {
+            throw new Unsupported(
+                'Stream copy cannot build an adaptive package: every video representation '
+                .'is filtered to its requested size, and filtering cannot be combined with codec copy',
             );
         }
 
@@ -136,7 +155,7 @@ abstract class Arguments
 
             $tracks[] = [
                 'index' => $index,
-                'language' => $language === 'und' ? '' : $language,
+                'language' => Name::language($language),
             ];
         }
 

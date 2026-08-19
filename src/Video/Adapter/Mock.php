@@ -10,6 +10,7 @@ use Utopia\Video\Exception\Input;
 use Utopia\Video\Exception\Unsupported;
 use Utopia\Video\Info;
 use Utopia\Video\Manifest;
+use Utopia\Video\Output;
 use Utopia\Video\Package;
 use Utopia\Video\Progress;
 use Utopia\Video\Segment;
@@ -102,11 +103,12 @@ class Mock extends Adapter implements Encoder, Packager, Probe
         }
 
         $this->directory(\dirname($path));
-        $this->progress();
-
-        \file_put_contents($path, 'mock encode of '.\basename($source));
 
         try {
+            $this->progress();
+
+            \file_put_contents($path, 'mock encode of '.\basename($source));
+
             $path = $this->wrote($path);
             $this->reportSuccess(self::NAME.': encoded '.$path);
 
@@ -133,11 +135,26 @@ class Mock extends Adapter implements Encoder, Packager, Probe
 
         $output = $this->target;
         $dir = $this->directory($dir);
+
+        try {
+            return $this->packed($dir, $output);
+        } finally {
+            // The job is over, so the next open() starts a new one.
+            $this->inputs = [];
+        }
+    }
+
+    /**
+     * The pretend package itself, kept apart so pack() can end the job whatever
+     * happens here.
+     */
+    private function packed(string $dir, Output $output): Package
+    {
         $this->progress();
 
         $variants = [];
 
-        foreach (\array_values($this->reps) as $position => $rep) {
+        foreach ($this->reps as $position => $rep) {
             $segments = [];
 
             foreach ([0, 1] as $number) {
@@ -173,7 +190,6 @@ class Mock extends Adapter implements Encoder, Packager, Probe
             $manifests[] = new Manifest(Manifest::HLS, $master, true);
         }
 
-        $this->inputs = [];
         $this->reportSuccess(self::NAME.': packed '.$dir);
 
         return new Package(
@@ -187,6 +203,11 @@ class Mock extends Adapter implements Encoder, Packager, Probe
     public function grab(string $path, string $output, ?Thumb $options = null): string
     {
         $this->source($path);
+
+        if ($this->width <= 0 || $this->height <= 0) {
+            throw new Input(self::NAME.': source "'.$path.'" carries no image to grab');
+        }
+
         $this->directory(\dirname($output));
 
         \file_put_contents($output, 'mock still');
@@ -201,11 +222,22 @@ class Mock extends Adapter implements Encoder, Packager, Probe
     {
         $this->source($path);
         $options ??= new Tile();
+
+        // The same refusals the real adapter makes, so code proved against this
+        // double behaves the same way once ffmpeg is behind it.
+        if ($this->width <= 0 || $this->height <= 0) {
+            throw new Input(self::NAME.': source "'.$path.'" carries no video to tile');
+        }
+
+        if ($this->duration <= 0) {
+            throw new Input(self::NAME.': source "'.$path.'" has no measurable duration');
+        }
+
         $dir = $this->directory($dir);
 
         $interval = $options->every($this->duration);
         $width = $options->size();
-        $height = (int) \round($width / ($this->width / \max(1, $this->height)));
+        $height = (int) \round($width / ($this->width / $this->height));
 
         $file = $options->base().'1.jpg';
         \file_put_contents($dir.'/'.$file, 'mock sheet');

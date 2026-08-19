@@ -25,6 +25,12 @@ final class Name
     /** A label carrying an extension, such as master.m3u8. */
     private const FILE = '/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9]+)+$/';
 
+    /** A plain filename carrying FFmpeg's DASH placeholders. */
+    private const TEMPLATE = '/^[A-Za-z0-9_.%$-]+$/';
+
+    /** A conservative BCP-47 language tag, safe in a muxer list and playlist. */
+    private const LANGUAGE = '/^[A-Za-z0-9]{1,8}(?:-[A-Za-z0-9]{1,8})*$/';
+
     /**
      * @throws Input
      */
@@ -53,5 +59,49 @@ final class Name
         }
 
         return $value;
+    }
+
+    /**
+     * A DASH segment filename template. It may carry the placeholders FFmpeg
+     * understands, but never a directory component.
+     *
+     * @throws Input
+     */
+    public static function template(string $value, string $what): string
+    {
+        $remaining = \preg_replace(
+            '/\$(?:RepresentationID|Number(?:%0?\d*d)?|Bandwidth(?:%0?\d*d)?|'
+                .'Time(?:%0?\d*d)?|SubNumber(?:%0?\d*d)?|ext)\$|\$\$/',
+            '',
+            $value,
+        );
+
+        if (
+            $value === ''
+            || \preg_match(self::TEMPLATE, $value) !== 1
+            || $remaining === null
+            || \str_contains($remaining, '$')
+            || $value === '.'
+            || $value === '..'
+        ) {
+            throw new Input(
+                $what.' "'.$value.'" is not usable as a DASH filename template; '
+                .'expected a plain filename with supported $...$ placeholders',
+            );
+        }
+
+        return $value;
+    }
+
+    /**
+     * Optional metadata is omitted when it cannot safely be represented.
+     */
+    public static function language(string $value): string
+    {
+        if ($value === '' || \strcasecmp($value, 'und') === 0) {
+            return '';
+        }
+
+        return \preg_match(self::LANGUAGE, $value) === 1 ? $value : '';
     }
 }

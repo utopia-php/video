@@ -33,6 +33,14 @@ class Encoder
     protected readonly Probe $prober;
 
     /**
+     * Registered on this object rather than on one job, so that open() can drop
+     * the adapter's listeners without dropping the caller's.
+     *
+     * @var array<string, list<callable>>
+     */
+    protected array $listeners = [];
+
+    /**
      * @param  Reporter|null  $reporter  Where status lines go; null keeps them on
      *                                   the terminal.
      */
@@ -97,7 +105,8 @@ class Encoder
     }
 
     /**
-     * Start a job. Anything configured by a previous one is discarded.
+     * Start a job. Anything configured by a previous one is discarded, listeners
+     * excepted: those belong to this object and outlive the job. See off().
      */
     public function open(string $path): static
     {
@@ -106,9 +115,18 @@ class Encoder
         }
 
         // Passed straight through: the adapter's own open() makes the same
-        // promise about dropping the last job's format, rungs and listeners, so
-        // there is nothing worth buffering here.
+        // promise about dropping the last job's format and rungs, so there is
+        // nothing worth buffering here.
         $this->adapter->open($path);
+
+        // Listeners are the exception. The adapter drops its own on open(), so
+        // this object's are handed over again afterwards; without that, on()
+        // before open() would read perfectly and be silently discarded.
+        foreach ($this->listeners as $event => $listeners) {
+            foreach ($listeners as $listener) {
+                $this->adapter->on($event, $listener);
+            }
+        }
 
         return $this;
     }
@@ -128,11 +146,44 @@ class Encoder
     }
 
     /**
+     * Register a listener for PROGRESS or LOG.
+     *
+     * Order does not matter: a listener registered before open() survives it and
+     * hears the job that follows.
+     *
      * @param  callable  $listener
      */
     public function on(string $event, callable $listener): static
     {
+        $this->listeners[$event][] = $listener;
         $this->adapter->on($event, $listener);
+
+        return $this;
+    }
+
+    /**
+     * Drop the listeners for one event, or every listener when given nothing.
+     *
+     * Listeners outlive a job, so this is how a reused Encoder stops reporting
+     * to the last job's listener before it registers the next one's.
+     *
+     * A backend that extends Adapter is detached immediately. One that only
+     * implements Adapter\Encoder has no off() to call — Observable declares just
+     * on(), so that a backend written elsewhere is not asked for more — and it
+     * lets go of its copy at the next open() instead.
+     */
+    public function off(?string $event = null): static
+    {
+        if ($event === null) {
+            $this->listeners = [];
+        } else {
+            unset($this->listeners[$event]);
+        }
+
+        // The same test the constructor makes before it pushes a probe.
+        if ($this->adapter instanceof Adapter) {
+            $this->adapter->off($event);
+        }
 
         return $this;
     }

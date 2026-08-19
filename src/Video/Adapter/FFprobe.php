@@ -52,6 +52,7 @@ class FFprobe extends Adapter implements Probe
             throw new Runtime('ffprobe returned output that could not be read');
         }
 
+        /** @var array<string, mixed> $data ffprobe's payload is a JSON object. */
         return $this->info($data);
     }
 
@@ -71,15 +72,23 @@ class FFprobe extends Adapter implements Probe
         $tracks = [];
         $audioTracks = [];
 
+        /** @var array<string, string> $videoTags */
+        $videoTags = [];
+
         foreach ($streams as $stream) {
             $type = \is_string($stream['codec_type'] ?? null) ? $stream['codec_type'] : Track::DATA;
 
-            if ($type === Track::VIDEO && $this->artwork($stream)) {
-                $cover ??= $this->integer($stream, 'index') ?? 0;
-            }
+            // Read once and passed down: every tag lookup below would otherwise
+            // rebuild and lowercase the whole set again.
+            $tags = $this->tags($stream);
 
-            if ($type === Track::VIDEO && $video === null && ! $this->artwork($stream)) {
-                $video = $stream;
+            if ($type === Track::VIDEO) {
+                if ($this->artwork($stream)) {
+                    $cover ??= $this->integer($stream, 'index') ?? 0;
+                } elseif ($video === null) {
+                    $video = $stream;
+                    $videoTags = $tags;
+                }
             }
 
             if ($type === Track::AUDIO) {
@@ -89,11 +98,11 @@ class FFprobe extends Adapter implements Probe
 
                 $audioTracks[] = [
                     'codec' => $this->string($stream, 'codec_name') ?? '',
-                    'language' => $this->tag($stream, 'language') ?? 'und',
+                    'language' => $tags['language'] ?? 'und',
                 ];
             }
 
-            $tracks[] = $this->track($stream, $type);
+            $tracks[] = $this->track($stream, $type, $tags);
         }
 
         $duration = (float) ($this->string($format, 'duration') ?? 0);
@@ -126,7 +135,7 @@ class FFprobe extends Adapter implements Probe
             tags: $this->tags($format),
             tracks: $tracks,
             chapters: $this->chapters($data),
-            rotation: $video !== null ? $this->rotation($video) : null,
+            rotation: $video !== null ? $this->rotation($video, $videoTags) : null,
             cover: $cover,
             raw: $data,
         );
@@ -134,8 +143,9 @@ class FFprobe extends Adapter implements Probe
 
     /**
      * @param  array<string, mixed>  $stream
+     * @param  array<string, string>  $tags  Already read from the stream.
      */
-    private function track(array $stream, string $type): Track
+    private function track(array $stream, string $type, array $tags): Track
     {
         /** @var array<string, mixed> $disposition */
         $disposition = \is_array($stream['disposition'] ?? null) ? $stream['disposition'] : [];
@@ -144,11 +154,11 @@ class FFprobe extends Adapter implements Probe
             index: $this->integer($stream, 'index') ?? 0,
             type: $type,
             codec: $this->string($stream, 'codec_name'),
-            language: $this->tag($stream, 'language'),
-            title: $this->tag($stream, 'title'),
+            language: $tags['language'] ?? null,
+            title: $tags['title'] ?? null,
             default: $this->integer($disposition, 'default') === 1,
             forced: $this->integer($disposition, 'forced') === 1,
-            tags: $this->tags($stream),
+            tags: $tags,
         );
     }
 
@@ -169,9 +179,10 @@ class FFprobe extends Adapter implements Probe
                 continue;
             }
 
+            /** @var array<string, mixed> $chapter */
             $chapters[] = new Chapter(
-                start: (float) ($chapter['start_time'] ?? 0),
-                end: (float) ($chapter['end_time'] ?? 0),
+                start: (float) ($this->string($chapter, 'start_time') ?? 0),
+                end: (float) ($this->string($chapter, 'end_time') ?? 0),
                 title: $this->tag($chapter, 'title'),
             );
         }
@@ -186,8 +197,14 @@ class FFprobe extends Adapter implements Probe
      */
     private function artwork(array $stream): bool
     {
-        return \is_array($stream['disposition'] ?? null)
-            && (int) ($stream['disposition']['attached_pic'] ?? 0) === 1;
+        $disposition = $stream['disposition'] ?? null;
+
+        if (! \is_array($disposition)) {
+            return false;
+        }
+
+        /** @var array<string, mixed> $disposition */
+        return $this->integer($disposition, 'attached_pic') === 1;
     }
 
     /**
@@ -227,20 +244,26 @@ class FFprobe extends Adapter implements Probe
 
     /**
      * @param  array<string, mixed>  $stream
+     * @param  array<string, string>  $tags  Already read from the stream.
      */
-    private function rotation(array $stream): ?int
+    private function rotation(array $stream, array $tags): ?int
     {
         if (\is_array($stream['side_data_list'] ?? null)) {
             foreach ($stream['side_data_list'] as $side) {
-                if (\is_array($side) && isset($side['rotation'])) {
-                    return (int) $side['rotation'];
+                if (! \is_array($side)) {
+                    continue;
+                }
+
+                /** @var array<string, mixed> $side */
+                $angle = $this->string($side, 'rotation');
+
+                if ($angle !== null) {
+                    return (int) $angle;
                 }
             }
         }
 
-        $tag = $this->tag($stream, 'rotate');
-
-        return $tag === null ? null : (int) $tag;
+        return isset($tags['rotate']) ? (int) $tags['rotate'] : null;
     }
 
     /**
@@ -265,6 +288,10 @@ class FFprobe extends Adapter implements Probe
     }
 
     /**
+     * One tag off a payload whose tags are not needed for anything else.
+     *
+     * Anything reading more than one tag should call tags() once instead.
+     *
      * @param  array<string, mixed>  $source
      */
     private function tag(array $source, string $name): ?string

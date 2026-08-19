@@ -223,34 +223,121 @@ abstract class Adapters extends TestCase
     }
 
     /**
-     * A finished job must not leak into the next one, on the facade or inside
-     * the adapter it delegates to.
+     * A listener registered once is heard by every job, the same number of times
+     * each — the adapter must not accumulate a fresh copy on each pack().
      */
     public function testReusingOnePackagerDoesNotRepeatEvents(): void
     {
         $packager = $this->packager();
 
-        // A counter per round, so the two closures cannot share a variable and
-        // hide the very accumulation this is looking for.
-        $counts = [0, 0];
+        // A counter per round, so accumulation inside the adapter shows up as
+        // one round's tally outgrowing the other's rather than hiding in a sum.
+        $counts = [0, 0, 0];
+        $round = 0;
 
-        foreach ([0, 1] as $round) {
+        // LOG rather than PROGRESS because it is deterministic: a backend emits
+        // the same number of lines for the same job twice over, where progress
+        // blocks arrive on a timer and vary run to run. A backend that says
+        // nothing at the default level counts zero every round and passes here
+        // trivially; the Mock suite is where these tallies are non-zero.
+        $packager->on(Packager::LOG, function () use (&$counts, &$round): void {
+            $counts[$round]++;
+        });
+
+        for ($round = 0; $round < 3; $round++) {
             $packager
                 ->open($this->source())
                 ->format($this->format())
                 ->add(new Representation(320, 240, 400, 64))
                 ->output((new Hls())->segment(2))
-                ->on(Packager::LOG, function () use (&$counts, $round): void {
-                    $counts[$round]++;
-                })
                 ->pack($this->dir.'/round'.$round);
         }
 
+        // Accumulation shows up as 1, 2, 3 rather than as one round being wrong.
         $this->assertSame(
-            $counts[1],
-            $counts[0],
-            'the first job\'s listener should not still be firing during the second',
+            [$counts[0], $counts[0], $counts[0]],
+            $counts,
+            'the listener should fire the same number of times for each job',
         );
+    }
+
+    /**
+     * on() reads naturally before open(), so it has to work there.
+     */
+    public function testAListenerRegisteredBeforeOpenIsStillHeard(): void
+    {
+        $seen = 0;
+
+        $this->packager()
+            ->on(Packager::PROGRESS, function () use (&$seen): void {
+                $seen++;
+            })
+            ->open($this->source())
+            ->format($this->format())
+            ->add(new Representation(320, 240, 400, 64))
+            ->output((new Hls())->segment(2))
+            ->pack($this->dir);
+
+        $this->assertGreaterThan(0, $seen);
+    }
+
+    public function testAnEncoderListenerRegisteredBeforeOpenIsStillHeard(): void
+    {
+        $seen = 0;
+
+        $this->encoder()
+            ->on(Encoder::PROGRESS, function () use (&$seen): void {
+                $seen++;
+            })
+            ->open($this->source())
+            ->format($this->format())
+            ->add(new Representation(320, 240, 400, 64))
+            ->encode($this->dir.'/early.mp4');
+
+        $this->assertGreaterThan(0, $seen);
+    }
+
+    /**
+     * off() is what a reused facade uses to stop reporting to the last job's
+     * listener, now that listeners outlive a job.
+     */
+    public function testListenersCanBeDropped(): void
+    {
+        $seen = 0;
+
+        $packager = $this->packager()->on(Packager::PROGRESS, function () use (&$seen): void {
+            $seen++;
+        });
+
+        $packager->off(Packager::PROGRESS);
+
+        $packager
+            ->open($this->source())
+            ->format($this->format())
+            ->add(new Representation(320, 240, 400, 64))
+            ->output((new Hls())->segment(2))
+            ->pack($this->dir);
+
+        $this->assertSame(0, $seen);
+    }
+
+    public function testEncoderListenersCanBeDropped(): void
+    {
+        $seen = 0;
+
+        $encoder = $this->encoder()->on(Encoder::PROGRESS, function () use (&$seen): void {
+            $seen++;
+        });
+
+        $encoder->off();
+
+        $encoder
+            ->open($this->source())
+            ->format($this->format())
+            ->add(new Representation(320, 240, 400, 64))
+            ->encode($this->dir.'/dropped.mp4');
+
+        $this->assertSame(0, $seen);
     }
 
     public function testOpeningAgainForgetsThePreviousJob(): void

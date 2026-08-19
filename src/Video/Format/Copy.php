@@ -31,6 +31,10 @@ final class Copy extends Format
 
     /**
      * Quality knobs are meaningless without an encoder, so they are ignored.
+     *
+     * The codecs themselves are not: a caller who named one in the constructor
+     * gets it, and codec() reports the same thing this writes. Hardcoding "copy"
+     * here would have made that pair disagree.
      */
     public function build(bool $video = true, bool $audio = true, ?float $cadence = null): array
     {
@@ -38,12 +42,12 @@ final class Copy extends Format
 
         if ($video) {
             $args[] = '-c:v';
-            $args[] = 'copy';
+            $args[] = $this->video;
         }
 
         if ($audio) {
             $args[] = '-c:a';
-            $args[] = 'copy';
+            $args[] = $this->audio;
         }
 
         foreach ($this->params as $param) {

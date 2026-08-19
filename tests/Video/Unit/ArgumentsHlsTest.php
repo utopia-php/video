@@ -6,7 +6,9 @@ namespace Utopia\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Arguments\Hls as Arguments;
+use Utopia\Video\Exception\Input;
 use Utopia\Video\Exception\Unsupported;
+use Utopia\Video\Format\Copy;
 use Utopia\Video\Format\VP9;
 use Utopia\Video\Format\X264;
 use Utopia\Video\Info;
@@ -157,6 +159,21 @@ class ArgumentsHlsTest extends TestCase
         $this->assertStringContainsString('a:0,agroup:audio,language:eng,name:audio_0,default:yes', $argv);
         $this->assertStringContainsString('a:1,agroup:audio,language:spa,name:audio_1', $argv);
         $this->assertStringNotContainsString('a:1,agroup:audio,language:spa,name:audio_1,default:yes', $argv);
+    }
+
+    public function testUnsafeLanguageMetadataIsOmittedWithoutDroppingTheTrack(): void
+    {
+        $info = $this->info(audioTracks: [
+            ['codec' => 'aac', 'language' => 'eng,default:yes'],
+            ['codec' => 'aac', 'language' => 'en-US'],
+        ]);
+
+        $argv = $this->build($info, [new Representation(1280, 720, 2538, 128)]);
+
+        $this->assertSame(2, \substr_count($argv, '-map 0:a:'));
+        $this->assertStringNotContainsString('eng,default:yes', $argv);
+        $this->assertStringContainsString('a:0,agroup:audio,name:audio_0,default:yes', $argv);
+        $this->assertStringContainsString('a:1,agroup:audio,language:en-US,name:audio_1', $argv);
     }
 
     public function testUntaggedAudioBecomesOneAnonymousRendition(): void
@@ -326,6 +343,37 @@ class ArgumentsHlsTest extends TestCase
             $this->info(),
             new VP9(),
             [new Representation(1280, 720, 2538)],
+            new Hls(),
+            '/out',
+        );
+    }
+
+    public function testStreamCopyIsRejectedBeforeFfmpegRuns(): void
+    {
+        $this->expectException(Unsupported::class);
+        $this->expectExceptionMessage('Stream copy cannot build an adaptive package');
+
+        new Arguments(
+            $this->info(),
+            new Copy(),
+            [new Representation(1280, 720, 2538)],
+            new Hls(),
+            '/out',
+        );
+    }
+
+    public function testRepresentationNamesHaveToBeUniqueWithinALadder(): void
+    {
+        $this->expectException(Input::class);
+        $this->expectExceptionMessage('Representation name "360p" is used more than once');
+
+        new Arguments(
+            $this->info(),
+            new X264(),
+            [
+                new Representation(640, 360, 800),
+                new Representation(480, 360, 500),
+            ],
             new Hls(),
             '/out',
         );

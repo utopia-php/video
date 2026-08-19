@@ -61,13 +61,29 @@ abstract class Adapter
         self::DEBUG,
     ];
 
-    /** The slug this backend answers to. Matches the factory keys. */
+    /**
+     * The slug this backend answers to. Matches the factory keys.
+     *
+     * Annotated because a constant reached through static:: is only as typed as
+     * the subclass redeclaring it. PHP 8.3 typed constants would say it in the
+     * language; 8.2 is the floor here.
+     *
+     * @var string
+     */
     protected const NAME = '';
 
-    /** The binary it drives, or an empty string when it needs none. */
+    /**
+     * The binary it drives, or an empty string when it needs none.
+     *
+     * @var string
+     */
     protected const BINARY = '';
 
-    /** Seconds a command may run. 0 disables the limit. */
+    /**
+     * Seconds a command may run. 0 disables the limit.
+     *
+     * @var int
+     */
     protected const TIMEOUT = 0;
 
     /**
@@ -76,6 +92,8 @@ abstract class Adapter
      * Errors only, because the interesting output of an encode is the file it
      * wrote, not its commentary. Raise it when something needs explaining:
      * whatever the backend then prints arrives as LOG events.
+     *
+     * @var string
      */
     protected const LEVEL = self::ERROR;
 
@@ -107,6 +125,9 @@ abstract class Adapter
 
     /** @var array<string, list<callable>> */
     protected array $listeners = [];
+
+    /** Remembered answer to available(), which costs a process to work out. */
+    private ?bool $available = null;
 
     /**
      * @param  string|null  $level  One of the constants above; null keeps the default.
@@ -246,10 +267,14 @@ abstract class Adapter
 
     /**
      * Whether this backend's binary can actually be run here.
+     *
+     * Answered by running the binary, so the answer is remembered: a caller
+     * checking before each of a hundred jobs should not pay for a hundred
+     * processes to be spawned.
      */
     public function available(): bool
     {
-        return $this->binary === '' || Process::exists($this->binary);
+        return $this->available ??= $this->binary === '' || Process::exists($this->binary);
     }
 
     /**
@@ -268,6 +293,20 @@ abstract class Adapter
         return $this->reporter ??= new Reporter\Console();
     }
 
+    /**
+     * Drop the listeners for one event, or every listener when given nothing.
+     */
+    public function off(?string $event = null): static
+    {
+        if ($event === null) {
+            $this->listeners = [];
+        } else {
+            unset($this->listeners[$event]);
+        }
+
+        return $this;
+    }
+
     protected function emit(string $event, mixed $payload): void
     {
         foreach ($this->listeners[$event] ?? [] as $listener) {
@@ -280,7 +319,7 @@ abstract class Adapter
      */
     protected function forget(): void
     {
-        $this->listeners = [];
+        $this->off();
     }
 
     /**
@@ -394,9 +433,7 @@ abstract class Adapter
     {
         $output = '';
 
-        $this->process($command, function (string $line) use (&$output): void {
-            $output .= $line."\n";
-        }, null, $timeout);
+        $this->process($command, Process::collector($output), null, $timeout);
 
         return $output;
     }

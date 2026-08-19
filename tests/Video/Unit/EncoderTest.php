@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Utopia\Video\Encoder;
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Format\X264;
+use Utopia\Video\Progress;
 use Utopia\Video\Representation;
 
 class EncoderTest extends TestCase
@@ -86,7 +87,8 @@ class EncoderTest extends TestCase
         $this->encoder($adapter)
             ->open($this->file)
             ->add(new Representation(1280, 720, 2538))
-            ->on(Encoder::PROGRESS, function ($progress) use (&$seen): void {
+            ->on(Encoder::PROGRESS, function (mixed $progress) use (&$seen): void {
+                $this->assertInstanceOf(Progress::class, $progress);
                 $seen[] = $progress->percent;
             })
             ->encode($this->dir.'/video.mp4');

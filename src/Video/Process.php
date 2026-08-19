@@ -79,105 +79,128 @@ final class Process
         $open = [1 => $pipes[1], 2 => $pipes[2]];
 
         $interrupted = 0;
+        $closed = false;
 
-        while ($open !== []) {
-            // Checked before the wait rather than after the read, so a command
-            // that has gone quiet is still stopped on time.
-            if ($timeout > 0 && (\microtime(true) - $started) > $timeout) {
-                throw self::halt(
-                    $process,
-                    $open,
-                    $errors,
-                    'Command "'.$command[0].'" timed out after '.$timeout.'s',
-                    $command,
-                );
-            }
+        try {
+            while ($open !== []) {
+                // Checked before the wait rather than after the read, so a command
+                // that has gone quiet is still stopped on time.
+                if ($timeout > 0 && (\microtime(true) - $started) > $timeout) {
+                    $failure = self::halt(
+                        $process,
+                        $open,
+                        $errors,
+                        'Command "'.$command[0].'" timed out after '.$timeout.'s',
+                        $command,
+                    );
+                    $closed = true;
 
-            $read = \array_values($open);
-            $write = null;
-            $except = null;
-
-            if (@\stream_select($read, $write, $except, 0, 200000) === false) {
-                if (++$interrupted <= self::RETRIES) {
-                    continue;
+                    throw $failure;
                 }
 
-                throw self::halt(
-                    $process,
-                    $open,
-                    $errors,
-                    'Lost contact with "'.$command[0].'" while reading its output',
-                    $command,
-                );
-            }
+                $read = \array_values($open);
+                $write = null;
+                $except = null;
 
-            $interrupted = 0;
+                if (@\stream_select($read, $write, $except, 0, 200000) === false) {
+                    if (++$interrupted <= self::RETRIES) {
+                        continue;
+                    }
 
-            foreach ($open as $key => $pipe) {
-                if (! \in_array($pipe, $read, true)) {
-                    continue;
+                    $failure = self::halt(
+                        $process,
+                        $open,
+                        $errors,
+                        'Lost contact with "'.$command[0].'" while reading its output',
+                        $command,
+                    );
+                    $closed = true;
+
+                    throw $failure;
                 }
 
-                $chunk = \fread($pipe, 8192);
+                $interrupted = 0;
 
-                if ($chunk === false || $chunk === '') {
-                    if (\feof($pipe)) {
-                        if ($buffers[$key] !== '') {
-                            self::emit($key, $buffers[$key], $stdout, $stderr);
-                            $buffers[$key] = '';
+                foreach ($open as $key => $pipe) {
+                    if (! \in_array($pipe, $read, true)) {
+                        continue;
+                    }
+
+                    $chunk = \fread($pipe, 8192);
+
+                    if ($chunk === false || $chunk === '') {
+                        if (\feof($pipe)) {
+                            if ($buffers[$key] !== '') {
+                                self::emit($key, $buffers[$key], $stdout, $stderr);
+                                $buffers[$key] = '';
+                            }
+
+                            \fclose($pipe);
+                            unset($open[$key]);
                         }
 
-                        \fclose($pipe);
-                        unset($open[$key]);
+                        continue;
                     }
 
-                    continue;
-                }
+                    if ($key === 2) {
+                        $errors = \substr($errors.$chunk, -self::TAIL);
+                    }
 
-                if ($key === 2) {
-                    $errors = \substr($errors.$chunk, -self::TAIL);
-                }
+                    $buffers[$key] .= $chunk;
 
-                $buffers[$key] .= $chunk;
-
-                while (($break = \strpos($buffers[$key], "\n")) !== false) {
-                    $line = \substr($buffers[$key], 0, $break);
-                    $buffers[$key] = \substr($buffers[$key], $break + 1);
-                    self::emit($key, $line, $stdout, $stderr);
-                }
-
-                // ffmpeg separates progress blocks with \r when writing to a terminal.
-                while (($break = \strpos($buffers[$key], "\r")) !== false) {
-                    $line = \substr($buffers[$key], 0, $break);
-                    $buffers[$key] = \substr($buffers[$key], $break + 1);
-
-                    if (\trim($line) !== '') {
+                    while (($break = \strpos($buffers[$key], "\n")) !== false) {
+                        $line = \substr($buffers[$key], 0, $break);
+                        $buffers[$key] = \substr($buffers[$key], $break + 1);
                         self::emit($key, $line, $stdout, $stderr);
                     }
-                }
 
-                // Nothing says a stream has to send line breaks, and a binary
-                // one never will, so a buffer that has grown past a plausible
-                // line is handed over as it stands rather than held forever.
-                if (\strlen($buffers[$key]) >= self::LINE) {
-                    self::emit($key, $buffers[$key], $stdout, $stderr);
-                    $buffers[$key] = '';
+                    // ffmpeg separates progress blocks with \r when writing to a terminal.
+                    while (($break = \strpos($buffers[$key], "\r")) !== false) {
+                        $line = \substr($buffers[$key], 0, $break);
+                        $buffers[$key] = \substr($buffers[$key], $break + 1);
+
+                        if (\trim($line) !== '') {
+                            self::emit($key, $line, $stdout, $stderr);
+                        }
+                    }
+
+                    // Nothing says a stream has to send line breaks, and a binary
+                    // one never will, so a buffer that has grown past a plausible
+                    // line is handed over as it stands rather than held forever.
+                    if (\strlen($buffers[$key]) >= self::LINE) {
+                        self::emit($key, $buffers[$key], $stdout, $stderr);
+                        $buffers[$key] = '';
+                    }
                 }
             }
+
+            $status = \proc_close($process);
+            $closed = true;
+
+            if ($status !== 0) {
+                throw new Runtime(
+                    'Command "'.$command[0].'" failed with exit code '.$status,
+                    $command,
+                    \trim($errors),
+                    $status,
+                );
+            }
+
+            return \trim($errors);
+        } finally {
+            // A user listener is application code and may throw. It must not
+            // strand the child process merely because control left the read
+            // loop by a route other than our own timeout/error exceptions.
+            if (! $closed) {
+                self::halt(
+                    $process,
+                    $open,
+                    $errors,
+                    'Command "'.$command[0].'" was interrupted while reading its output',
+                    $command,
+                );
+            }
         }
-
-        $status = \proc_close($process);
-
-        if ($status !== 0) {
-            throw new Runtime(
-                'Command "'.$command[0].'" failed with exit code '.$status,
-                $command,
-                \trim($errors),
-                $status,
-            );
-        }
-
-        return \trim($errors);
     }
 
     /**
@@ -191,11 +214,22 @@ final class Process
     {
         $output = '';
 
-        self::run($command, function (string $line) use (&$output): void {
-            $output .= $line."\n";
-        }, null, $timeout);
+        self::run($command, self::collector($output), null, $timeout);
 
         return $output;
+    }
+
+    /**
+     * A line listener that appends everything it is given to a string.
+     *
+     * @param  string  $into  Filled in as lines arrive.
+     * @return callable(string):void
+     */
+    public static function collector(string &$into): callable
+    {
+        return static function (string $line) use (&$into): void {
+            $into .= $line."\n";
+        };
     }
 
     /**

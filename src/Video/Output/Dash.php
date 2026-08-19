@@ -39,9 +39,10 @@ class Dash extends Output
      */
     public function template(bool $enabled): static
     {
-        $this->template = $enabled;
+        $copy = clone $this;
+        $copy->template = $enabled;
 
-        return $this;
+        return $copy;
     }
 
     /**
@@ -49,16 +50,20 @@ class Dash extends Output
      */
     public function timeline(bool $enabled): static
     {
-        $this->timeline = $enabled;
+        $copy = clone $this;
+        $copy->timeline = $enabled;
 
-        return $this;
+        return $copy;
     }
 
     public function manifest(string $filename): static
     {
-        $this->manifest = Name::file($filename, 'Manifest');
+        $manifest = Name::file($filename, 'Manifest');
 
-        return $this;
+        $copy = clone $this;
+        $copy->manifest = $manifest;
+
+        return $copy;
     }
 
     /**
@@ -66,9 +71,12 @@ class Dash extends Output
      */
     public function init(string $pattern): static
     {
-        $this->initName = $pattern;
+        $pattern = Name::template($pattern, 'Initialisation segment pattern');
 
-        return $this;
+        $copy = clone $this;
+        $copy->initName = $pattern;
+
+        return $copy;
     }
 
     /**
@@ -76,9 +84,12 @@ class Dash extends Output
      */
     public function media(string $pattern): static
     {
-        $this->mediaName = $pattern;
+        $pattern = Name::template($pattern, 'Media segment pattern');
 
-        return $this;
+        $copy = clone $this;
+        $copy->mediaName = $pattern;
+
+        return $copy;
     }
 
     /**
@@ -86,9 +97,10 @@ class Dash extends Output
      */
     public function sets(string $definition): static
     {
-        $this->sets = $definition;
+        $copy = clone $this;
+        $copy->sets = $definition;
 
-        return $this;
+        return $copy;
     }
 
     public function templated(): bool

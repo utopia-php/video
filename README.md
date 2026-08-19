@@ -207,6 +207,11 @@ $encoder = new Encoder(new FFmpeg(level: Adapter::VERBOSE));
 $encoder->on(Encoder::LOG, fn (string $line) => error_log($line));
 ```
 
+Listeners belong to the facade, not to one job: `on()` reads the same before or after `open()`, and
+a listener registered once is heard by every job that facade runs. `off()` drops them again —
+`off(Encoder::LOG)` for one event, `off()` for all of them — which is what a reused facade wants
+before it registers the next job's listener.
+
 `Adapter::QUIET`, `ERROR` (default), `WARNING`, `INFO`, `VERBOSE`, `DEBUG` — quietest first, listed
 in `Adapter::LEVELS`. An unrecognised level is rejected when the adapter is constructed, not halfway
 through a job.
@@ -242,6 +247,49 @@ Ask which backend is serving what:
 $encoder->getName();   // 'ffmpeg'
 $packager->getName();  // 'ffmpeg'
 ```
+
+### Coroutines
+
+The library is built to run inside Swoole coroutines. Two rules make it safe:
+
+**Config and results are shareable; a facade is not.** `Format`, `Output`, `Thumb` and `Tile` are
+immutable — every setter returns a modified copy, so a preset held in a container can be handed to
+any number of concurrent jobs and configured per job without the jobs seeing each other:
+
+```php
+$preset = (new X264())->crf(22);          // shared, safe
+$output = (new Cmaf())->segment(6);       // shared, safe
+
+go(function () use ($preset, $output, $in) {
+    // One facade per coroutine. Constructing one is a handful of assignments —
+    // nothing runs until open() — so there is nothing to save by sharing it,
+    // and a facade holds the job chain, which two coroutines would corrupt.
+    (new Packager())
+        ->open($in)
+        ->format($preset->keyframe(2.0))  // a copy; $preset is untouched
+        ->add(new Representation(width: 1280, height: 720, video: 2538, audio: 128))
+        ->output($output)
+        ->pack('/out/a');
+});
+```
+
+The same goes for adapters: an `Adapter\FFmpeg` carries its job's state, so give each coroutine its
+own rather than passing one instance to several facades running concurrently. Every result object
+(`Info`, `Package`, `Spritesheet`, `Progress`) is readonly and safe to share.
+
+**Enable the hooks.** `Process` drives backends through `proc_open`, `stream_select` and `usleep`,
+all of which yield instead of blocking once Swoole's one-click hooks are on — including the process
+hook (`SWOOLE_HOOK_PROC`, part of `SWOOLE_HOOK_ALL`):
+
+```php
+Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
+```
+
+Without the hooks everything still works; a running backend just blocks the worker instead of
+yielding to other coroutines.
+
+Because setters return copies, a setter called as a standalone statement configures the copy and
+throws it away — chain from the constructor, or keep the return value.
 
 ### Choosing a backend by name
 

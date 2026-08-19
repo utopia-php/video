@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Video\Exception;
 
+use Throwable;
 use Utopia\Video\Exception;
 
 /**
@@ -21,8 +22,9 @@ class Runtime extends Exception
         private readonly array $command = [],
         private readonly string $output = '',
         int $code = 0,
+        ?Throwable $previous = null,
     ) {
-        parent::__construct($message, $code);
+        parent::__construct($message, $code, $previous);
     }
 
     /**

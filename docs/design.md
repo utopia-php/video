@@ -83,9 +83,14 @@ Three rules keep the design honest:
    which silently ignored the one asked for.
 
 1. **Data flows one way.** `Format`, `Representation`, `Output`, `Thumb`, and `Tile` are pure user config —
-   adapters never write into them. Probe-derived facts (`hasVideo`, audio tracks, duration) live in
-   `Info`, produced once at `open()`, and are passed to the argv builders and the progress reporter.
-   The same `Output` instance is safely reusable across jobs, and progress always knows the duration.
+   adapters never write into them, and their setters return modified copies rather than touching the
+   receiver, so they are immutable in both directions. Probe-derived facts (`hasVideo`, audio tracks,
+   duration) live in `Info`, produced once at `open()`, and are passed to the argv builders and the
+   progress reporter. The same `Output` instance is safely shareable across jobs — and across
+   coroutines — and progress always knows the duration. Facades and adapters are the opposite: they
+   hold one job's chain, so concurrent work takes one instance per coroutine (they cost a handful of
+   assignments to build; nothing runs until `open()`). The one process-global the library touches,
+   libxml's error flag in `Parser\Mpd`, is set and restored with no suspension point in between.
 2. **`Packager::pack()` picks the execution path from the types, not a flag.** If the adapter is also
    an `Adapter\Encoder` (i.e. `Adapter\FFmpeg`), the whole job runs as **one fused ffmpeg
    invocation** — encode and package in a single pass. If it only packages, `Packager` first encodes
@@ -141,6 +146,15 @@ $package = $packager->open($in)
 `Encoder` delegates each call straight through — the adapter's own `open()` already restarts a job,
 so there is nothing worth buffering. `Packager` buffers the chain, because `pack()` has to know the
 whole job before it can choose between the fused and staged routes.
+
+Listeners are the one thing a facade keeps rather than delegates. An adapter drops its own on
+`open()`, which is what stops one job's listeners firing during the next; a facade re-registers
+its listeners afterwards, so `on()` means the same thing before `open()` as after it. Without that,
+`->on(...)->open(...)->pack(...)` — the ordering the chain invites — registered a listener and
+then silently discarded it. `off($event)` drops one event's listeners and `off()` drops all of
+them, which is how a reused facade swaps one job's listener for the next one's. `off()` is on
+`Adapter` rather than on `Observable`, so a backend written against the narrow interface still
+satisfies it.
 
 Events: `PROGRESS` → `fn (Progress $p)`, `LOG` → `fn (string $line)` (raw backend stderr). The
 constants live on `Adapter\Observable` — the interface that declares `on()` — and are re-exported by
@@ -239,7 +253,7 @@ to be an encoder. Callers that hold an interface-typed backend and want it check
 
 | Class | Binary | Timeout | Notes |
 |---|---|---|---|
-| `Adapter\FFmpeg` | `ffmpeg` | 0 | `Encoder`, `Packager`. Every invocation is prefixed `-y -hide_banner -loglevel {level}`. Fused encode+package, or `-c copy` remux with `Format\Copy`. `encode()` writes one rendition of the picture and keeps **every** audio track. `grab()` takes an exact `-ss` seek or an auto representative frame (`-vf thumbnail`), and finds embedded cover art via `Info::$cover`. `tile()` owns the adaptive-interval table |
+| `Adapter\FFmpeg` | `ffmpeg` | 0 | `Encoder`, `Packager`. Every invocation is prefixed `-y -hide_banner -loglevel {level}`. Fused encode+package; `Format\Copy` is available for single-file `encode()` remuxes, but adaptive packaging rejects it because every video representation is filtered to its requested size and filters cannot be combined with stream copy. `encode()` writes one rendition of the picture and keeps **every** audio track. `grab()` takes an exact `-ss` seek or an auto representative frame (`-vf thumbnail`), and finds embedded cover art via `Info::$cover`. `tile()` owns the adaptive-interval table |
 | `Adapter\FFprobe` | `ffprobe` | 30 | `Probe`. `-v {level} -print_format json -show_format -show_streams -show_chapters`. The payload comes back on stdout and the commentary on stderr, so a raised level cannot corrupt the JSON |
 | `Adapter\Mock` | none | — | All three, writing placeholder files. Ships in `src/` so consumers can test pipelines with no tools installed |
 
@@ -284,7 +298,7 @@ abstract class Format
 Format\X264   // libx264 + aac; defaults bf 1, keyint_min 25, g 250, sc_threshold 40
 Format\HEVC   // libx265 + aac
 Format\VP9    // libvpx-vp9 + libopus     (DASH-only packaging — see §4)
-Format\Copy   // -c copy: package/remux without re-encoding (input must be keyframe-aligned)
+Format\Copy   // -c copy: remux one file with Encoder::encode(); adaptive packaging rejects stream copy
 
 // Output — base: segment(float $seconds = 6.0), manifests(bool = true), name(string = 'stream'), params(array)
 Output\Hls  ->type(Hls::MPEGTS | Hls::FMP4)  // fmp4 → init segment + EXT-X-MAP, playlist VERSION 7
@@ -567,7 +581,8 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
 
 - `Arguments\{Hls,Dash,Cmaf}`: argv assertions on the built command — multi-rep single-command shape
   (the v1 regression), SegmentList vs SegmentTemplate flags, fMP4 flag set (`independent_segments`,
-  no `allow_cache`), audio-only inputs dropping all video args, `Format\Copy` remux, capped-CRF
+  no `allow_cache`), audio-only inputs dropping all video args, single-file `Format\Copy` remux and
+  adaptive-package rejection, capped-CRF
   defaults (`-maxrate:v:N`/`-bufsize:v:N` derived when unset), multi-audio `var_stream_map` built
   from language tags with untagged tracks still carried, and the keyframe cadence falling back to the
   segment length (with an interval longer than a segment rejected).
@@ -577,14 +592,21 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
   (multi-track with embedded subtitles), `rotation`, `cover`, audio-only, missing-field defaults.
 - The facades against fakes: `Encoder` delegation, `Packager`'s fused-vs-staged choice, staged
   progress climbing once 0→100 across every rung, listener forwarding, `open()` forgetting the last
-  job. The staged half runs against a **pure `Adapter\Packager` fake** — that is what keeps the v2
+  job's config, and listeners surviving it (registered before `open()` or after, dropped by `off()`). The staged half runs against a **pure `Adapter\Packager` fake** — that is what keeps the v2
   packager seam continuously proven while no pure packager ships.
 - `Thumb` defaults and grab argv: exact `-ss` seek vs `-vf thumbnail` auto mode, scale math,
   image format from output extension, cover-art (`attached_pic`) mapping.
-- `Tile` adaptive-interval table; cue geometry math (`x/y` from grid position).
+- `Tile` adaptive-interval table; cue geometry math (`x/y` from grid position); every `Tile` and
+  `Thumb` knob that cannot work (zero interval, unscalable width, empty grid, off-scale quality)
+  rejected as `Exception\Input` at the setter rather than as a division by zero mid-job.
 - Config validation: `Representation` bounds, `Format` knobs, unsupported `Output` combos throwing
   `Exception\Unsupported` — including a mixed-aspect ladder for DASH/CMAF, whose message names the
   offending rungs (the muxer says only "Conflicting stream aspect ratios", after it has started).
+- Config immutability: every setter on `Format`, `Output`, `Thumb` and `Tile`, table-driven —
+  the return is a new instance, the receiver keeps its value, the copy carries the new one — plus
+  the sharing scenario itself (two holders of one preset configuring it independently). A
+  Swoole-gated E2E (`CoroutineTest`, skipped without ext-swoole) runs three coroutines, one
+  `Encoder` each, off one shared `Thumb` under `SWOOLE_HOOK_ALL`.
 - `Process`: fake scripts exercising exit codes, timeouts (including the stderr tail surviving the
   termination that ends them), stdout/stderr line callbacks, progress-block parsing, and a stream
   that never sends a line break.

@@ -6,6 +6,7 @@ namespace Utopia\Tests\Unit;
 
 use Utopia\Video\Adapter\Mock;
 use Utopia\Video\Encoder;
+use Utopia\Video\Exception\Input;
 use Utopia\Video\Packager;
 use Utopia\Tests\Adapters;
 
@@ -76,5 +77,40 @@ class MockTest extends Adapters
         $this->assertSame(12.0, $info->duration);
         $this->assertSame(1280, $info->width);
         $this->assertFalse($info->hasAudio);
+    }
+
+    /**
+     * A double that accepts what the real backend refuses is worse than a plain
+     * bug: it is what code gets proved against. FFmpeg raises Input for a source
+     * with no picture in it, so this has to as well — it used to divide by zero.
+     */
+    public function testRefusesToTileASourceWithNoVideo(): void
+    {
+        $adapter = (new Mock())->pretend(duration: 8.0, width: 0, height: 0, audio: true);
+
+        $this->expectException(Input::class);
+        $this->expectExceptionMessage('carries no video to tile');
+
+        (new Encoder($adapter, $adapter))->tile($this->source(), $this->dir.'/tiles');
+    }
+
+    public function testRefusesToGrabFromASourceWithNoPicture(): void
+    {
+        $adapter = (new Mock())->pretend(duration: 8.0, width: 0, height: 0, audio: true);
+
+        $this->expectException(Input::class);
+        $this->expectExceptionMessage('carries no image to grab');
+
+        (new Encoder($adapter, $adapter))->grab($this->source(), $this->dir.'/still.jpg');
+    }
+
+    public function testRefusesToTileASourceWithNoDuration(): void
+    {
+        $adapter = (new Mock())->pretend(duration: 0.0);
+
+        $this->expectException(Input::class);
+        $this->expectExceptionMessage('no measurable duration');
+
+        (new Encoder($adapter, $adapter))->tile($this->source(), $this->dir.'/tiles');
     }
 }

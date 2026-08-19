@@ -132,4 +132,22 @@ class FormatTest extends TestCase
         $this->assertSame('h264_videotoolbox', $format->codec());
         $this->assertSame('libfdk_aac', $format->sound());
     }
+
+    /**
+     * codec() and build() have to agree, or a caller inspecting the format is
+     * told one thing while ffmpeg is told another.
+     */
+    public function testCopyEmitsTheCodecsItReports(): void
+    {
+        $copy = new Copy();
+
+        $this->assertSame('copy', $copy->codec());
+        $this->assertSame(['-c:v', 'copy', '-c:a', 'copy'], $copy->build());
+
+        $named = new Copy('libx264', 'libopus');
+
+        $this->assertSame('libx264', $named->codec());
+        $this->assertSame('libopus', $named->sound());
+        $this->assertSame(['-c:v', 'libx264', '-c:a', 'libopus'], $named->build());
+    }
 }

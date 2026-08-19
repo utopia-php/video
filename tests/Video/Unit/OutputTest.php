@@ -6,6 +6,7 @@ namespace Utopia\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Exception\Input;
+use Utopia\Video\Exception\Unsupported;
 use Utopia\Video\Output;
 use Utopia\Video\Output\Cmaf;
 use Utopia\Video\Output\Dash;
@@ -193,6 +194,50 @@ class OutputTest extends TestCase
         $this->expectException(Input::class);
 
         (new Hls())->init('../init.mp4');
+    }
+
+    public function testDashSegmentPatternsCannotLeaveTheOutputDirectory(): void
+    {
+        foreach (
+            [
+                '../chunk_$Number$.m4s',
+                'nested/chunk_$Number$.m4s',
+                'nested\\chunk_$Number$.m4s',
+                '/tmp/chunk_$Number$.m4s',
+                'chunk_$Unknown$.m4s',
+            ] as $pattern
+        ) {
+            try {
+                (new Dash())->media($pattern);
+                $this->fail('expected "'.$pattern.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a DASH filename template', $exception->getMessage());
+            }
+        }
+
+        $output = (new Dash())
+            ->init('init_$RepresentationID$.$ext$')
+            ->media('chunk_$RepresentationID$_$Number%05d$.$ext$');
+
+        $this->assertSame('init_$RepresentationID$.$ext$', $output->initPattern());
+        $this->assertSame('chunk_$RepresentationID$_$Number%05d$.$ext$', $output->mediaPattern());
+    }
+
+    /**
+     * A container the muxer does not know is a typo, and a typo found after an
+     * hour of encoding is a typo found too late.
+     */
+    public function testAnUnknownHlsSegmentContainerIsRejected(): void
+    {
+        $this->expectException(Unsupported::class);
+
+        (new Hls())->segments('mp4');
+    }
+
+    public function testBothHlsSegmentContainersAreAccepted(): void
+    {
+        $this->assertSame('ts', (new Hls())->segments(Hls::MPEGTS)->extension());
+        $this->assertSame('m4s', (new Hls())->segments(Hls::FMP4)->extension());
     }
 
     public function testThumbDefaults(): void

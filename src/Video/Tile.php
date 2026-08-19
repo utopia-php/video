@@ -4,8 +4,18 @@ declare(strict_types=1);
 
 namespace Utopia\Video;
 
+use Utopia\Video\Exception\Input;
+
 /**
  * How to build sprite sheets for a scrubbing timeline.
+ *
+ * Every knob is checked as it is set, the way a Representation checks its own.
+ * These values become divisors and filter arguments, so a zero or a negative
+ * reaches ffmpeg as a broken filter or never reaches it at all, and the failure
+ * lands a long way from the call that caused it.
+ *
+ * Immutable: every setter returns a modified copy and leaves the receiver
+ * untouched, so one instance can be shared across jobs and coroutines.
  */
 final class Tile
 {
@@ -29,38 +39,64 @@ final class Tile
      */
     public function interval(?float $seconds): self
     {
-        $this->interval = $seconds;
+        if ($seconds !== null && $seconds <= 0) {
+            throw new Input('Sprite interval must be greater than zero, got '.$seconds);
+        }
 
-        return $this;
+        $copy = clone $this;
+        $copy->interval = $seconds;
+
+        return $copy;
     }
 
     public function width(int $pixels): self
     {
-        $this->width = $pixels;
+        if ($pixels < 2) {
+            throw new Input('Sprite width must be at least 2 pixels, got '.$pixels);
+        }
 
-        return $this;
+        $copy = clone $this;
+        $copy->width = $pixels;
+
+        return $copy;
     }
 
     public function grid(int $columns, int $rows): self
     {
-        $this->columns = $columns;
-        $this->rows = $rows;
+        if ($columns < 1 || $rows < 1) {
+            throw new Input('Sprite grid must be at least 1x1, got '.$columns.'x'.$rows);
+        }
 
-        return $this;
+        $copy = clone $this;
+        $copy->columns = $columns;
+        $copy->rows = $rows;
+
+        return $copy;
     }
 
+    /**
+     * Encoder quality scale, where lower is better. ffmpeg's -qscale:v runs 1 to 31.
+     */
     public function quality(int $quality): self
     {
-        $this->quality = $quality;
+        if ($quality < 1 || $quality > 31) {
+            throw new Input('Sprite quality must be between 1 and 31, got '.$quality);
+        }
 
-        return $this;
+        $copy = clone $this;
+        $copy->quality = $quality;
+
+        return $copy;
     }
 
     public function name(string $base): self
     {
-        $this->name = Name::label($base, 'Sprite sheet name');
+        $name = Name::label($base, 'Sprite sheet name');
 
-        return $this;
+        $copy = clone $this;
+        $copy->name = $name;
+
+        return $copy;
     }
 
     /**
@@ -68,9 +104,10 @@ final class Tile
      */
     public function vtt(bool $write): self
     {
-        $this->vtt = $write;
+        $copy = clone $this;
+        $copy->vtt = $write;
 
-        return $this;
+        return $copy;
     }
 
     /**

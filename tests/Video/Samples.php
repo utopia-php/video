@@ -186,6 +186,7 @@ final class Samples
      */
     private static function encoders(): array
     {
+        /** @var list<string>|null $found */
         static $found = null;
 
         if ($found !== null) {

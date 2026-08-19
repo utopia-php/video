@@ -36,23 +36,16 @@ final class Cmaf extends Dash
 
     public function master(string $filename): static
     {
-        $this->master = Name::file($filename, 'Master playlist');
+        $master = Name::file($filename, 'Master playlist');
 
-        return $this;
+        $copy = clone $this;
+        $copy->master = $master;
+
+        return $copy;
     }
 
     public function masterFile(): string
     {
         return $this->master;
-    }
-
-    public function initPattern(): string
-    {
-        return $this->initName ?? $this->name.'_init_$RepresentationID$.$ext$';
-    }
-
-    public function mediaPattern(): string
-    {
-        return $this->mediaName ?? $this->name.'_chunk_$RepresentationID$_$Number%05d$.$ext$';
     }
 }

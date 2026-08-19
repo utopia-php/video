@@ -125,11 +125,14 @@ class AdapterTest extends TestCase
      */
     public function testABackendDeclaresOnlyWhatItCanDo(): void
     {
-        $ffprobe = new FFprobe();
+        // Asked of the class rather than of an instance: the claim is about what
+        // FFprobe declares, and an instanceof against a known type is a claim
+        // about nothing that analysis will happily prove for you.
+        $implements = \class_implements(FFprobe::class);
 
-        $this->assertInstanceOf(Probe::class, $ffprobe);
-        $this->assertNotInstanceOf(EncoderAdapter::class, $ffprobe);
-        $this->assertNotInstanceOf(PackagerAdapter::class, $ffprobe);
+        $this->assertContains(Probe::class, $implements);
+        $this->assertNotContains(EncoderAdapter::class, $implements);
+        $this->assertNotContains(PackagerAdapter::class, $implements);
     }
 
     /**

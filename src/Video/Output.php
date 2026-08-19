@@ -8,8 +8,9 @@ namespace Utopia\Video;
  * How a package should be laid out on disk.
  *
  * These objects only ever carry what the caller asked for. Nothing discovered
- * about the source is written back into them, so one instance can be reused
- * across as many jobs as you like.
+ * about the source is written back into them, and every setter returns a
+ * modified copy rather than touching the receiver, so one instance can be
+ * shared across as many jobs — and coroutines — as you like.
  */
 abstract class Output
 {
@@ -40,9 +41,10 @@ abstract class Output
      */
     public function segment(float $seconds): static
     {
-        $this->segment = $seconds;
+        $copy = clone $this;
+        $copy->segment = $seconds;
 
-        return $this;
+        return $copy;
     }
 
     /**
@@ -53,9 +55,10 @@ abstract class Output
      */
     public function manifests(bool $write): static
     {
-        $this->manifests = $write;
+        $copy = clone $this;
+        $copy->manifests = $write;
 
-        return $this;
+        return $copy;
     }
 
     /**
@@ -63,9 +66,12 @@ abstract class Output
      */
     public function name(string $base): static
     {
-        $this->name = Name::label($base, 'Output name');
+        $name = Name::label($base, 'Output name');
 
-        return $this;
+        $copy = clone $this;
+        $copy->name = $name;
+
+        return $copy;
     }
 
     /**
@@ -75,9 +81,10 @@ abstract class Output
      */
     public function params(array $params): static
     {
-        $this->params = $params;
+        $copy = clone $this;
+        $copy->params = $params;
 
-        return $this;
+        return $copy;
     }
 
     public function duration(): float

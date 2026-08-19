@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Video\Output;
 
+use Utopia\Video\Exception\Unsupported;
 use Utopia\Video\Name;
 use Utopia\Video\Output;
 
@@ -15,6 +16,13 @@ final class Hls extends Output
     public const MPEGTS = 'mpegts';
 
     public const FMP4 = 'fmp4';
+
+    /**
+     * Every container the hls muxer can segment into.
+     *
+     * @var list<string>
+     */
+    public const CONTAINERS = [self::MPEGTS, self::FMP4];
 
     private string $segments = self::MPEGTS;
 
@@ -34,12 +42,25 @@ final class Hls extends Output
 
     /**
      * Transport stream segments, or fragmented MP4 for CMAF compatible output.
+     *
+     * Rejected here rather than by the muxer: a container it does not know is a
+     * typo, and a typo is worth catching before a ladder has been encoded.
+     *
+     * @throws Unsupported
      */
     public function segments(string $type): static
     {
-        $this->segments = $type;
+        if (! \in_array($type, self::CONTAINERS, true)) {
+            throw new Unsupported(
+                'No HLS segment container named "'.$type.'"; expected one of '
+                .\implode(', ', self::CONTAINERS),
+            );
+        }
 
-        return $this;
+        $copy = clone $this;
+        $copy->segments = $type;
+
+        return $copy;
     }
 
     /**
@@ -47,16 +68,22 @@ final class Hls extends Output
      */
     public function init(string $filename): static
     {
-        $this->init = Name::file($filename, 'Initialisation segment');
+        $init = Name::file($filename, 'Initialisation segment');
 
-        return $this;
+        $copy = clone $this;
+        $copy->init = $init;
+
+        return $copy;
     }
 
     public function master(string $filename): static
     {
-        $this->master = Name::file($filename, 'Master playlist');
+        $master = Name::file($filename, 'Master playlist');
 
-        return $this;
+        $copy = clone $this;
+        $copy->master = $master;
+
+        return $copy;
     }
 
     /**
@@ -64,9 +91,10 @@ final class Hls extends Output
      */
     public function url(string $url): static
     {
-        $this->url = $url;
+        $copy = clone $this;
+        $copy->url = $url;
 
-        return $this;
+        return $copy;
     }
 
     /**
@@ -74,9 +102,10 @@ final class Hls extends Output
      */
     public function flags(array $flags): static
     {
-        $this->flags = $flags;
+        $copy = clone $this;
+        $copy->flags = $flags;
 
-        return $this;
+        return $copy;
     }
 
     public function fragmented(): bool

@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Utopia\Video\Cue;
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Spritesheet;
+use Utopia\Video\Thumb;
 use Utopia\Video\Tile;
 
 class SpritesheetTest extends TestCase
@@ -144,5 +145,76 @@ class SpritesheetTest extends TestCase
         $this->expectException(Input::class);
 
         (new Tile())->name('../sheets');
+    }
+
+    /**
+     * The interval is a divisor. Zero used to reach ffmpeg as a DivisionByZeroError
+     * rather than as anything a caller could catch.
+     *
+     * @dataProvider brokenTiles
+     */
+    public function testATileSettingThatCannotWorkIsRejected(callable $configure): void
+    {
+        $this->expectException(Input::class);
+
+        $configure(new Tile());
+    }
+
+    /**
+     * @return array<string, array{0: callable}>
+     */
+    public static function brokenTiles(): array
+    {
+        return [
+            'zero interval' => [static fn (Tile $tile) => $tile->interval(0.0)],
+            'negative interval' => [static fn (Tile $tile) => $tile->interval(-1.0)],
+            'zero width' => [static fn (Tile $tile) => $tile->width(0)],
+            'negative width' => [static fn (Tile $tile) => $tile->width(-160)],
+            'empty grid' => [static fn (Tile $tile) => $tile->grid(0, 0)],
+            'negative grid' => [static fn (Tile $tile) => $tile->grid(5, -1)],
+            'quality below scale' => [static fn (Tile $tile) => $tile->quality(0)],
+            'quality above scale' => [static fn (Tile $tile) => $tile->quality(32)],
+        ];
+    }
+
+    /**
+     * An unset interval is how a caller asks for the duration-scaled default,
+     * so null stays legal.
+     */
+    public function testAnUnsetIntervalIsStillAllowed(): void
+    {
+        $this->assertSame(2.0, (new Tile())->interval(null)->every(8.0));
+    }
+
+    /**
+     * @dataProvider brokenThumbs
+     */
+    public function testAThumbSettingThatCannotWorkIsRejected(callable $configure): void
+    {
+        $this->expectException(Input::class);
+
+        $configure(new Thumb());
+    }
+
+    /**
+     * @return array<string, array{0: callable}>
+     */
+    public static function brokenThumbs(): array
+    {
+        return [
+            'negative time' => [static fn (Thumb $thumb) => $thumb->time(-1.0)],
+            'unscalable width' => [static fn (Thumb $thumb) => $thumb->width(1)],
+            'negative width' => [static fn (Thumb $thumb) => $thumb->width(-320)],
+            'quality below scale' => [static fn (Thumb $thumb) => $thumb->quality(0)],
+            'quality above scale' => [static fn (Thumb $thumb) => $thumb->quality(32)],
+        ];
+    }
+
+    /**
+     * Zero width is how a caller asks to keep the source size, so it stays legal.
+     */
+    public function testAThumbWidthOfZeroKeepsTheSourceSize(): void
+    {
+        $this->assertSame(0, (new Thumb())->width(0)->size());
     }
 }

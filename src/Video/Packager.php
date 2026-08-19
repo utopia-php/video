@@ -13,6 +13,8 @@ use Utopia\Video\Adapter\Probe;
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Exception\Runtime;
 use Utopia\Video\Exception\Unsupported;
+use Utopia\Video\Format\Copy;
+use Utopia\Video\Format\X264;
 
 /**
  * Turns a source into an adaptive ladder: segments plus the manifests that
@@ -115,7 +117,8 @@ class Packager
     }
 
     /**
-     * Start a job. Anything configured by a previous one is discarded.
+     * Start a job. Anything configured by a previous one is discarded, listeners
+     * excepted: those belong to this object and outlive the job. See off().
      */
     public function open(string $path): static
     {
@@ -128,10 +131,10 @@ class Packager
         $this->target = null;
         $this->reps = [];
 
-        // Listeners belong to a job too, so a reused Packager does not report the
-        // previous job's listeners alongside this one's. The adapters make the
-        // same promise about open().
-        $this->listeners = [];
+        // Listeners are deliberately kept. They were registered on this object,
+        // not on the job, and clearing them here made on() before open() read
+        // perfectly and do nothing. Adapters still drop theirs on open(), which
+        // is why attach() re-registers at the point the work starts.
 
         return $this;
     }
@@ -160,11 +163,33 @@ class Packager
     }
 
     /**
+     * Register a listener for PROGRESS or LOG.
+     *
+     * Order does not matter: a listener registered before open() survives it and
+     * hears the job that follows.
+     *
      * @param  callable  $listener
      */
     public function on(string $event, callable $listener): static
     {
         $this->listeners[$event][] = $listener;
+
+        return $this;
+    }
+
+    /**
+     * Drop the listeners for one event, or every listener when given nothing.
+     *
+     * Listeners outlive a job, so this is how a reused Packager stops reporting
+     * to the last job's listener before it registers the next one's.
+     */
+    public function off(?string $event = null): static
+    {
+        if ($event === null) {
+            $this->listeners = [];
+        } else {
+            unset($this->listeners[$event]);
+        }
 
         return $this;
     }
@@ -182,6 +207,32 @@ class Packager
 
         if ($this->reps === []) {
             throw new Unsupported('At least one representation is required');
+        }
+
+        $names = [];
+
+        foreach ($this->reps as $rep) {
+            if (isset($names[$rep->name])) {
+                throw new Input('Representation name "'.$rep->name.'" is used more than once');
+            }
+
+            $names[$rep->name] = true;
+        }
+
+        if ($this->encoding instanceof Copy) {
+            throw new Unsupported(
+                'Stream copy cannot build an adaptive package: every video representation '
+                .'is filtered to its requested size, and filtering cannot be combined with codec copy',
+            );
+        }
+
+        $interval = $this->encoding?->interval();
+
+        if ($interval !== null && $interval > $this->target->duration()) {
+            throw new Unsupported(
+                'A keyframe every '.$interval.'s cannot cut '.$this->target->duration()
+                .'s segments; the keyframe interval has to be the segment length or a fraction of it',
+            );
         }
 
         if ($this->adapter instanceof EncoderAdapter) {
@@ -229,15 +280,16 @@ class Packager
 
         $total = \count($this->reps);
         $files = [];
+        $format = $this->encoding ?? new X264();
+
+        if ($format->interval() === null) {
+            $format = $format->keyframe($output->duration());
+        }
 
         try {
             foreach ($this->reps as $position => $rep) {
                 $encoder = $this->encoder->open($source);
-
-                if ($this->encoding !== null) {
-                    $encoder->format($this->encoding);
-                }
-
+                $encoder->format($format);
                 $encoder->add($rep);
 
                 // Encoding is the slow part, so it owns most of the progress bar.

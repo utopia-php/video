@@ -9,6 +9,7 @@ use Utopia\Video\Adapter\Encoder as EncoderAdapter;
 use Utopia\Video\Adapter\Packager as PackagerAdapter;
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Exception\Unsupported;
+use Utopia\Video\Format\Copy;
 use Utopia\Video\Format\X264;
 use Utopia\Video\Output\Cmaf;
 use Utopia\Video\Packager;
@@ -129,6 +130,95 @@ class PackagerTest extends TestCase
             ->pack($this->dir.'/out');
 
         $this->assertDirectoryDoesNotExist($this->dir.'/out/.staging');
+    }
+
+    public function testStagedEncodingUsesTheSegmentLengthAsItsKeyframeCadence(): void
+    {
+        $encoder = new FakeEncoder();
+
+        $this->packager(encoder: $encoder)
+            ->open($this->file)
+            ->format(new X264())
+            ->add(new Representation(640, 360, 800))
+            ->output((new Cmaf())->segment(4))
+            ->pack($this->dir.'/out');
+
+        $this->assertNotNull($encoder->format);
+        $this->assertSame(4.0, $encoder->format->interval());
+    }
+
+    public function testAnExplicitStagedKeyframeCadenceStillWins(): void
+    {
+        $encoder = new FakeEncoder();
+
+        $this->packager(encoder: $encoder)
+            ->open($this->file)
+            ->format((new X264())->keyframe(2))
+            ->add(new Representation(640, 360, 800))
+            ->output((new Cmaf())->segment(6))
+            ->pack($this->dir.'/out');
+
+        $this->assertNotNull($encoder->format);
+        $this->assertSame(2.0, $encoder->format->interval());
+    }
+
+    public function testAnImpossibleStagedKeyframeCadenceIsRejectedBeforeEncoding(): void
+    {
+        $encoder = new FakeEncoder();
+
+        try {
+            $this->packager(encoder: $encoder)
+                ->open($this->file)
+                ->format((new X264())->keyframe(10))
+                ->add(new Representation(640, 360, 800))
+                ->output((new Cmaf())->segment(4))
+                ->pack($this->dir.'/out');
+            $this->fail('Expected the keyframe cadence to be rejected');
+        } catch (Unsupported $exception) {
+            $this->assertStringContainsString('A keyframe every 10s cannot cut 4s segments', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $encoder->encoded);
+    }
+
+    public function testStreamCopyIsRejectedBeforeStagedEncodingStarts(): void
+    {
+        $encoder = new FakeEncoder();
+
+        try {
+            $this->packager(encoder: $encoder)
+                ->open($this->file)
+                ->format(new Copy())
+                ->add(new Representation(640, 360, 800))
+                ->output(new Cmaf())
+                ->pack($this->dir.'/out');
+            $this->fail('Expected stream copy to be rejected');
+        } catch (Unsupported $exception) {
+            $this->assertStringContainsString('Stream copy cannot build an adaptive package', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $encoder->encoded);
+    }
+
+    public function testDuplicateNamesAreRejectedBeforeStagedEncodingStarts(): void
+    {
+        $encoder = new FakeEncoder();
+
+        try {
+            $this->packager(encoder: $encoder)
+                ->open($this->file)
+                ->add(
+                    new Representation(640, 360, 800),
+                    new Representation(480, 360, 500),
+                )
+                ->output(new Cmaf())
+                ->pack($this->dir.'/out');
+            $this->fail('Expected duplicate names to be rejected');
+        } catch (Input $exception) {
+            $this->assertStringContainsString('Representation name "360p" is used more than once', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $encoder->encoded);
     }
 
     public function testStagedProgressClimbsOnceAcrossEveryRung(): void

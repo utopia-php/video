@@ -140,6 +140,39 @@ class ProcessTest extends TestCase
         $this->assertSame(200000, \array_sum(\array_map('strlen', $lines)));
     }
 
+    public function testAThrowingListenerDoesNotLeaveTheChildRunning(): void
+    {
+        $marker = \sys_get_temp_dir().'/utopia-process-'.\bin2hex(\random_bytes(6));
+
+        try {
+            $failure = null;
+
+            try {
+                Process::run(
+                    [
+                        PHP_BINARY,
+                        '-r',
+                        'echo "ready\n"; flush(); usleep(500000); file_put_contents($argv[1], "alive");',
+                        $marker,
+                    ],
+                    static function (): void {
+                        throw new \LogicException('listener stopped');
+                    },
+                );
+            } catch (\Throwable $exception) {
+                $failure = $exception;
+            }
+
+            $this->assertInstanceOf(\LogicException::class, $failure);
+            $this->assertSame('listener stopped', $failure->getMessage());
+
+            \usleep(700000);
+            $this->assertFileDoesNotExist($marker, 'the child survived after its listener threw');
+        } finally {
+            @\unlink($marker);
+        }
+    }
+
     public function testMissingBinaryIsAFailure(): void
     {
         $this->expectException(Runtime::class);

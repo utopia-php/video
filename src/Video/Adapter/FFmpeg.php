@@ -13,6 +13,7 @@ use Utopia\Video\Exception\Unsupported;
 use Utopia\Video\Format\X264;
 use Utopia\Video\Info;
 use Utopia\Video\Manifest;
+use Utopia\Video\Name;
 use Utopia\Video\Output;
 use Utopia\Video\Output\Cmaf;
 use Utopia\Video\Output\Dash;
@@ -163,7 +164,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $builder = Arguments::for(
             $info,
             $this->encoding ?? new X264(),
-            \array_values($this->reps),
+            $this->reps,
             $output,
             $dir,
             \count($this->inputs),
@@ -581,10 +582,10 @@ class FFmpeg extends Adapter implements Encoder, Packager
             return;
         }
 
-        $languages = \array_values(\array_map(
-            static fn (array $track): string => $track['language'],
+        $languages = \array_map(
+            static fn (array $track): string => Name::language($track['language']),
             $info->audioTracks,
-        ));
+        );
 
         $position = 0;
         $lines = \explode("\n", $body);
@@ -596,14 +597,14 @@ class FFmpeg extends Adapter implements Encoder, Packager
 
             $language = $languages[$position++] ?? null;
 
-            if ($language === null || $language === 'und' || \str_contains($line, 'LANGUAGE=')) {
+            if ($language === null || $language === '' || \str_contains($line, 'LANGUAGE=')) {
                 continue;
             }
 
             $lines[$index] = $line.',LANGUAGE="'.$language.'"';
         }
 
-        \file_put_contents($master, \implode("\n", $lines));
+        self::rewrite($master, \implode("\n", $lines));
     }
 
     /**
@@ -643,6 +644,21 @@ class FFmpeg extends Adapter implements Encoder, Packager
         }
 
         \array_splice($lines, $at, 0, '#EXT-X-INDEPENDENT-SEGMENTS');
-        \file_put_contents($master, \implode("\n", $lines));
+        self::rewrite($master, \implode("\n", $lines));
+    }
+
+    /**
+     * Writes a manifest back over itself.
+     *
+     * Failing quietly here would leave a package whose master says something
+     * different from what was asked for, which is worse than not packaging.
+     *
+     * @throws Runtime
+     */
+    private static function rewrite(string $master, string $body): void
+    {
+        if (\file_put_contents($master, $body) === false) {
+            throw new Runtime(self::NAME.': unable to write "'.$master.'"');
+        }
     }
 }

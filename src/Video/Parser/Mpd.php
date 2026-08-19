@@ -38,6 +38,11 @@ final class Mpd
 
         $duration = self::seconds($root->getAttribute('mediaPresentationDuration'));
 
+        // Segment length is declared once, on the root, as an ISO 8601 duration.
+        // Every variant shares it, so it is read here rather than looked for on
+        // an AdaptationSet that never carries it.
+        $target = self::seconds($root->getAttribute('maxSegmentDuration'));
+
         $metadata = [
             'profiles' => $root->getAttribute('profiles'),
             'type' => $root->getAttribute('type'),
@@ -50,16 +55,15 @@ final class Mpd
         $variants = [];
 
         foreach ($root->getElementsByTagName('AdaptationSet') as $index => $set) {
-            if (! $set instanceof DOMElement) {
-                continue;
-            }
-
             foreach ($set->getElementsByTagName('Representation') as $representation) {
-                if (! $representation instanceof DOMElement) {
-                    continue;
-                }
-
-                $variants[] = self::variant($set, $representation, (string) $index, $dir, $duration);
+                $variants[] = self::variant(
+                    $set,
+                    $representation,
+                    (string) $index,
+                    $dir,
+                    $duration,
+                    $target,
+                );
             }
         }
 
@@ -72,6 +76,7 @@ final class Mpd
         string $group,
         string $dir,
         float $duration,
+        float $target,
     ): Variant {
         $id = $representation->getAttribute('id');
         $id = $id !== '' ? $id : $group;
@@ -99,6 +104,15 @@ final class Mpd
             $bandwidth,
         );
 
+        $media = \array_filter(
+            $segments,
+            static fn (Segment $segment): bool => ! $segment->init,
+        );
+
+        if ($media === []) {
+            throw new Runtime('Representation "'.$id.'" contains no media segments');
+        }
+
         $language = $set->getAttribute('lang');
 
         return new Variant(
@@ -114,7 +128,7 @@ final class Mpd
             language: $language !== '' && $language !== 'und' ? $language : null,
             timescale: $timescale,
             startNumber: $start,
-            target: (float) $set->getAttribute('maxSegmentDuration'),
+            target: $target > 0.0 ? $target : self::longest($segments),
             segments: $segments,
         );
     }
@@ -130,16 +144,22 @@ final class Mpd
         float $duration,
         int $bandwidth,
     ): array {
-        $list = self::child($representation, 'SegmentList') ?? self::child($set, 'SegmentList');
+        // A Representation describes its own segments when it says anything at
+        // all, and only falls back to the AdaptationSet when it says nothing.
+        // Both of its own elements are therefore checked before either of the
+        // set's, or a rung carrying a template would be handed the set's list.
+        foreach ([$representation, $set] as $element) {
+            $list = self::child($element, 'SegmentList');
 
-        if ($list !== null) {
-            return self::listed($list, $id, $dir);
-        }
+            if ($list !== null) {
+                return self::listed($list, $id, $dir);
+            }
 
-        $template = self::child($representation, 'SegmentTemplate') ?? self::child($set, 'SegmentTemplate');
+            $template = self::child($element, 'SegmentTemplate');
 
-        if ($template !== null) {
-            return self::templated($template, $id, $dir, $duration, $bandwidth);
+            if ($template !== null) {
+                return self::templated($template, $id, $dir, $duration, $bandwidth);
+            }
         }
 
         return [[], 0, 0];
@@ -160,7 +180,9 @@ final class Mpd
             ? ((float) $list->getAttribute('duration')) / $timescale
             : 0.0;
 
-        $init = self::child($list, 'Initialization');
+        // Scoped to the list itself, which holds nothing but its own segments,
+        // so reaching past a direct child cannot stray into another rung.
+        $init = self::child($list, 'Initialization') ?? self::descendant($list, 'Initialization');
 
         if ($init !== null && $init->getAttribute('sourceURL') !== '') {
             $segments[] = self::segment($id, $dir, $init->getAttribute('sourceURL'), 0.0, true, 0);
@@ -169,10 +191,6 @@ final class Mpd
         $number = $start;
 
         foreach ($list->getElementsByTagName('SegmentURL') as $url) {
-            if (! $url instanceof DOMElement) {
-                continue;
-            }
-
             $segments[] = self::segment($id, $dir, $url->getAttribute('media'), $duration, false, $number);
             $number++;
         }
@@ -212,10 +230,6 @@ final class Mpd
             $number = $start;
 
             foreach ($timeline->getElementsByTagName('S') as $entry) {
-                if (! $entry instanceof DOMElement) {
-                    continue;
-                }
-
                 $length = ((float) $entry->getAttribute('d')) / $timescale;
                 $repeat = $entry->hasAttribute('r') ? (int) $entry->getAttribute('r') : 0;
 
@@ -272,7 +286,9 @@ final class Mpd
         foreach (['Number' => $number, 'Bandwidth' => $bandwidth] as $identifier => $value) {
             $name = \preg_replace_callback(
                 '/\$'.$identifier.'(%0?\d*d)?\$/',
-                static fn (array $match): string => isset($match[1]) && $match[1] !== ''
+                // The width group needs at least "%d" to match, so it is either
+                // absent or usable — there is no empty case to guard against.
+                static fn (array $match): string => isset($match[1])
                     ? \sprintf($match[1], $value)
                     : (string) $value,
                 $name,
@@ -309,7 +325,30 @@ final class Mpd
     }
 
     /**
+     * The longest segment in a list, which is what a target duration means.
+     *
+     * Used only when the manifest declares no maximum of its own.
+     *
+     * @param  list<Segment>  $segments
+     */
+    private static function longest(array $segments): float
+    {
+        $longest = 0.0;
+
+        foreach ($segments as $segment) {
+            $longest = \max($longest, $segment->duration);
+        }
+
+        return $longest;
+    }
+
+    /**
      * Reads an ISO 8601 duration such as PT1M4.5S.
+     *
+     * The date half is accepted as well as the time half, because a manifest is
+     * free to write PT2.0S as P0Y0M0DT0H0M2.0S and mean the same thing. Years
+     * and months have no fixed length, so a duration using them is refused
+     * rather than guessed at.
      */
     public static function seconds(string $value): float
     {
@@ -317,15 +356,36 @@ final class Mpd
             return 0.0;
         }
 
-        if (\preg_match('/^PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?$/', $value, $match) !== 1) {
+        $pattern = '/^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)W)?(?:(\d+(?:\.\d+)?)D)?'
+            .'(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/';
+
+        if (\preg_match($pattern, $value, $match) !== 1) {
             return 0.0;
         }
 
-        return ((float) ($match[1] ?? 0)) * 3600
-            + ((float) ($match[2] ?? 0)) * 60
-            + ((float) ($match[3] ?? 0));
+        // A bare P or PT matches, every group absent, and totals zero on its own.
+        $part = static fn (int $at): float => (float) ($match[$at] ?? 0);
+
+        // Years and months are the two designators with no fixed length in
+        // seconds, so a duration built from them is refused, not approximated.
+        if ($part(1) > 0.0 || $part(2) > 0.0) {
+            return 0.0;
+        }
+
+        return $part(3) * 604800
+            + $part(4) * 86400
+            + $part(5) * 3600
+            + $part(6) * 60
+            + $part(7);
     }
 
+    /**
+     * The first direct child with this tag.
+     *
+     * Direct children only, deliberately. A descendant search run from an
+     * AdaptationSet walks into its Representations, so a rung that declared
+     * nothing would be handed whatever a sibling rung declared.
+     */
     private static function child(DOMElement $element, string $tag): ?DOMElement
     {
         foreach ($element->childNodes as $node) {
@@ -334,9 +394,17 @@ final class Mpd
             }
         }
 
-        // Initialization can sit one level down inside a SegmentList.
-        $nodes = $element->getElementsByTagName($tag);
-        $first = $nodes->item(0);
+        return null;
+    }
+
+    /**
+     * The first descendant with this tag, at any depth.
+     *
+     * Only safe on an element that cannot contain another rung's markup.
+     */
+    private static function descendant(DOMElement $element, string $tag): ?DOMElement
+    {
+        $first = $element->getElementsByTagName($tag)->item(0);
 
         return $first instanceof DOMElement ? $first : null;
     }
@@ -363,13 +431,19 @@ final class Mpd
 
     private static function load(string $path): DOMDocument
     {
-        if (! \is_file($path)) {
+        // Read first, parse second. The libxml error flag below is process
+        // global, and under a coroutine runtime the file read is where this
+        // function can be suspended — so the read happens before the flag is
+        // touched, and nothing between set and restore can yield.
+        $body = \is_file($path) ? \file_get_contents($path) : false;
+
+        if ($body === false) {
             throw new Runtime('Unable to read manifest "'.$path.'"');
         }
 
         $document = new DOMDocument();
         $previous = \libxml_use_internal_errors(true);
-        $loaded = $document->load($path);
+        $loaded = $body !== '' && $document->loadXML($body);
         \libxml_clear_errors();
         \libxml_use_internal_errors($previous);
 
