@@ -67,6 +67,43 @@ class HlsTest extends Base
         $this->assertSame([240, 480], [$video[0]->height, $video[1]->height]);
     }
 
+    /**
+     * A segment can only start on a keyframe, so a job that never named a
+     * cadence has to take the segment length as one. Left to itself the encoder
+     * places keyframes on its own schedule — every 250 frames by default, which
+     * is longer than this whole fixture — so this eight second source would come
+     * back as one long segment however short a segment was asked for.
+     */
+    public function testDefaultsAloneStillCutSegmentsAtTheLengthAskedFor(): void
+    {
+        $package = (new Packager())
+            ->open(self::video())
+            ->format((new X264())->crf(30)->params(['-preset', 'ultrafast']))
+            ->add(new Representation(320, 240, 400, 64))
+            ->output((new Hls())->segment(3))
+            ->pack($this->dir);
+
+        $video = \array_values(\array_filter(
+            $package->variants(),
+            static fn ($variant): bool => $variant->type === Track::VIDEO,
+        ));
+
+        $this->assertCount(1, $video);
+        $this->assertGreaterThan(
+            1,
+            \count($video[0]->segments),
+            'the source was not cut at all, so the keyframes were never forced',
+        );
+
+        foreach ($video[0]->segments as $segment) {
+            $this->assertLessThan(
+                4.5,
+                $segment->duration,
+                'segment '.$segment->file.' ran past the length that was asked for',
+            );
+        }
+    }
+
     public function testEachRungIsEncodedAtItsOwnSize(): void
     {
         $package = $this->pack(
