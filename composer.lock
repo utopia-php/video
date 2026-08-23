@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b569159b6ddcf97be66d3f7df58dc3ba",
+    "content-hash": "fd123665d381e37cb9364461b0a83277",
     "packages": [
         {
             "name": "utopia-php/console",
