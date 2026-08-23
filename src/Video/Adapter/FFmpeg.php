@@ -54,7 +54,8 @@ class FFmpeg extends Adapter implements Encoder, Packager
 
     public function open(string $path, ?Representation $as = null): static
     {
-        $first = $this->inputs === [];
+        // Asked before registering, which is what starts the job.
+        $first = ! $this->started;
 
         $this->register($path, $as);
 
@@ -142,7 +143,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         } finally {
             // Both terminals end the job, so the next open() starts a new one
             // instead of adding a second input to this one.
-            $this->inputs = [];
+            $this->done();
         }
     }
 
@@ -192,7 +193,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
             return $package;
         } finally {
             // The job is over, so the next open() starts a new one.
-            $this->inputs = [];
+            $this->done();
         }
     }
 
@@ -291,6 +292,12 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $args[] = '-qscale:v';
         $args[] = (string) $options->scale();
         $args[] = $dir.'/'.$options->base().'%d.jpg';
+
+        // The sheets this run writes are numbered from one, and they are read
+        // back by counting upward until one is missing. A shorter run over the
+        // same directory would therefore inherit the tail of a longer one, so
+        // the numbering starts from an empty slate.
+        $this->sweep($dir, $options->base());
 
         $this->process($args);
 
@@ -412,6 +419,30 @@ class FFmpeg extends Adapter implements Encoder, Packager
         }
 
         return [$source, $this->details];
+    }
+
+    /**
+     * Removes the numbered sheets a previous run under this name left behind.
+     *
+     * Deliberately narrow: only the exact `{base}{digits}.jpg` shape that this
+     * adapter writes and sheet() reads back, so a directory shared with anything
+     * else — including a sheet name that merely starts the same way — keeps it.
+     */
+    private function sweep(string $dir, string $base): void
+    {
+        $matches = \glob($dir.'/'.$base.'[0-9]*.jpg');
+
+        if ($matches === false) {
+            return;
+        }
+
+        $shape = '/^'.\preg_quote($base, '/').'\d+\.jpg$/';
+
+        foreach ($matches as $match) {
+            if (\preg_match($shape, \basename($match)) === 1) {
+                @\unlink($match);
+            }
+        }
     }
 
     /**

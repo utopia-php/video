@@ -1,6 +1,6 @@
 # Utopia\Video v2 — Design
 
-> Status: **implemented** · last updated 2026-07-31 · targets ffmpeg 7.1 LTS (pinned in the repo image)
+> Status: **implemented** · last updated 2026-08-23 · targets ffmpeg 8.1 (pinned in the repo image)
 > CMAF dual-manifest strategy verified end-to-end against the repo image's ffmpeg build (see §4).
 
 A small, generic PHP library for video workflows: **probe** media and its metadata (tech specs,
@@ -29,7 +29,7 @@ Boundaries — the library:
   external binaries.
 
 Style: one-word public methods (`open`, `probe`, `encode`, `pack`, `grab`, `tile`, `valid`),
-short class names with no redundant context (`Encoder\FFmpeg`, not `FFmpegEncoderAdapter`),
+short class names with no redundant context (`Adapter\FFmpeg`, not `FFmpegEncoderAdapter`),
 config objects in, readonly results out.
 
 ## 1. Architecture
@@ -52,11 +52,14 @@ Consumer (worker / CLI / app)
         └─ Adapter\Mock       none        → all three           (ships in src/, for tests)
 
 Contracts:  Adapter\{Named, Observable} ← Adapter\{Encoder, Packager, Probe}
-Shared:     abstract Adapter (identity, listeners, config, guards) · trait Job · trait Reads · trait Decimal
+Shared:     abstract Adapter (identity, listeners, config, guards) · Adapter\{Job, Reads} traits
+            Reporter (Console|Silent) — where status lines go · trait Decimal, shared by the
+            adapter, config and argv hierarchies alike (four of them wanted one number formatter)
 
 Config in   (immutable): Format (X264|HEVC|VP9|Copy) · Representation · Output (Hls|Dash|Cmaf) · Thumb · Tile
 Results out (readonly):  Info{Track, Chapter} · Package{Variant, Segment, Manifest} · Spritesheet{Cue} · Progress
 Internal (@internal):    Process (proc_open) · Arguments\{Hls,Dash,Cmaf} (argv) · Parser\{M3u8,Mpd}
+                         Name (guards every caller-chosen string that reaches a path or argv)
 ```
 
 Capabilities are interfaces rather than methods on one god-class, so a backend
@@ -101,14 +104,16 @@ Three rules keep the design honest:
 
 ### Facades
 
-Both take the same shape: an adapter and a probe, each defaulted, each only ever known by its
-interface. Adapter names below are written relative to `Utopia\Video\Adapter`.
+Both take the same shape: an adapter, a probe and a reporter, each defaulted, each only ever known by
+its interface. Adapter names below are written relative to `Utopia\Video\Adapter`.
 
 ```php
-Encoder::__construct(?Adapter\Encoder $adapter = null, ?Adapter\Probe $probe = null)
+Encoder::__construct(?Adapter\Encoder $adapter = null, ?Adapter\Probe $probe = null,
+                     ?Reporter $reporter = null)
 Packager::__construct(?Adapter\Packager $adapter = null,
                       ?Adapter\Encoder $encoder = null,   // staged path only; defaults to the
-                      ?Adapter\Probe $probe = null)       //   adapter itself when it can encode
+                      ?Adapter\Probe $probe = null,       //   adapter itself when it can encode
+                      ?Reporter $reporter = null)         // null keeps Reporter\Console (§10.12)
 ```
 
 ```php
@@ -132,7 +137,7 @@ $ok   = $packager->valid($in);      // bool
 $poster = $encoder->grab($in, $jpg, new Thumb());   // written path — thumbnail / poster frame
 $sheet  = $encoder->tile($in, $dir, new Tile());    // Spritesheet
 
-// Job chain — open() restarts, encode()/pack() are terminal
+// Job chain — encode()/pack() are terminal, and clear the job they finish (§2, trait Job)
 $file = $encoder->open($in)->format($format)->add($rep)->encode($out);   // one plain file (≤1 rep)
 
 $package = $packager->open($in)
@@ -206,8 +211,12 @@ interface Probe extends Named
 `abstract class Adapter` supplies `getName()`, `on()`, `available()`, the probe seam, and the guards
 (`source()`, `directory()`, `wrote()`) that put the backend's name in every failure message.
 `trait Job` holds the chain state shared by encoding and packaging — inputs, ladder, output, format —
-and the rule that the first `open()` of a job forgets the previous one. `trait Reads` holds the one
-`valid()` body the probes share; `trait Decimal` the one number formatter four hierarchies wanted.
+and the rule about where one job ends and the next begins: a **terminal** clears the job it finishes,
+so `open()` has nothing of the previous one left to sweep away and drops only the adapter's listeners.
+That is what lets the chain read in either order — `add($rep)->open($in)` keeps its ladder, where
+clearing on `open()` instead discarded it silently, exactly the bug that made listeners outlive a job
+in the first place. `trait Reads` holds the one `valid()` body the probes share; `trait Decimal` the
+one number formatter four hierarchies wanted.
 
 `Packager` deliberately has no `format()` — a pure packager never encodes. `Adapter\FFmpeg` has it by
 also implementing `Encoder`, which is exactly what makes the fused pass possible, and what
@@ -238,9 +247,9 @@ and it maps onto what each backend already understands (`ffmpeg -loglevel`,
 `ffprobe -v`). Whatever the backend then prints arrives as `LOG` events, so
 raising the level is how a consumer gets an explanation without inventing a
 second logging concept. Separately, finished encode / pack / grab / tile jobs
-print a green `Console::success` line, and a failed backend command prints
-`Console::error` before throwing — so a consumer sees the outcome without a
-listener. Probe stays quiet on success. `QUIET` silences both the status lines
+print a green success line through the adapter's `Reporter` (the terminal
+unless a facade was given another), and a failed backend command reports an
+error before throwing — so a consumer sees the outcome without a listener. Probe stays quiet on success. `QUIET` silences both the status lines
 and the log; `PROGRESS` fires at every level, because progress is structured
 data rather than commentary. An unrecognised level throws
 `Exception\Unsupported` at construction — while it is still cheap to say so —
@@ -276,37 +285,52 @@ which is how a backend chosen from config stays identifiable.
 // Representation — readonly value object, named-args friendly; no collection class, add() is variadic
 new Representation(width: 1280, height: 720, video: 2538, audio: 128, name: '720p',
                    maxrate: null, bufsize: null);
-// name defaults to "{height}p" and drives artifact naming, so it is restricted to letters, digits,
-// underscores and hyphens: it becomes a filename, and it identifies the rendition to the muxer in a
-// list where a comma or a space would end the entry. Anything else throws Exception\Input.
+// name defaults to "{height}p" — or "audio" for a rung with no frame size — and drives artifact
+// naming, so it is restricted to letters, digits, underscores and hyphens: it becomes a filename, and
+// it identifies the rendition to the muxer in a list where a comma or a space would end the entry.
+// Anything else throws Exception\Input.
 // Capped CRF by default: when unset, maxrate = video (hard bitrate ceiling, -maxrate:v:N) and
-// bufsize = 2 × video (the smoothing window, -bufsize:v:N) — busy scenes can no longer spike
+// bufsize = 2 × maxrate (the smoothing window, -bufsize:v:N) — busy scenes can no longer spike
 // above the advertised rendition bitrate and stall constrained viewers.
 
 // Format — codec preset + the GOP/quality knobs that gate ABR correctness; bitrate is NOT here
 abstract class Format
 {
+    // Codecs are the preset's own; either is overridable at construction rather than by a
+    // setter, because a preset whose codec was swapped afterwards is a different preset:
+    //   new X264(audio: 'libfdk_aac')
+    public function __construct(?string $video = null, ?string $audio = null);
+
     public function crf(int $crf): static;             // -crf
-    public function bframes(int $count): static;       // -bf
+    public function bframes(int $count): static;       // -bf   (unset ⇒ the codec's own default)
     public function keyframe(float $seconds): static;  // -force_key_frames expr:gte(t,n_forced*S)
                                                       // unset ⇒ packaging uses the segment length,
                                                       // and an interval longer than a segment is
                                                       // rejected with Exception\Unsupported
-    public function audio(string $codec): static;      // override audio codec
     public function params(array $params): static;     // raw argv escape hatch (e.g. -dn -sn -vf …)
+
+    // Getters: video()/audio() are the preset's defaults, codec()/sound() what this instance
+    // settled on, interval() the configured keyframe cadence, supports() the outputs it can be
+    // packaged into (which is what rejects VP9 in CMAF — §4).
 }
-Format\X264   // libx264 + aac; defaults bf 1, keyint_min 25, g 250, sc_threshold 40
+Format\X264   // libx264 + aac; defaults keyint_min 25, g 250, sc_threshold 0
 Format\HEVC   // libx265 + aac
 Format\VP9    // libvpx-vp9 + libopus     (DASH-only packaging — see §4)
 Format\Copy   // -c copy: remux one file with Encoder::encode(); adaptive packaging rejects stream copy
 
 // Output — base: segment(float $seconds = 6.0), manifests(bool = true), name(string = 'stream'), params(array)
-Output\Hls  ->type(Hls::MPEGTS | Hls::FMP4)  // fmp4 → init segment + EXT-X-MAP, playlist VERSION 7
-            ->init('init.mp4')->master('master.m3u8')->base($url)->flags([...]);
+//          type() is the protocol this output is ('hls'|'dash'|'cmaf'), not a setter
+Output\Hls  ->segments(Hls::MPEGTS | Hls::FMP4)  // default MPEGTS; fmp4 → init segment + EXT-X-MAP,
+                                                //   playlist VERSION 7
+            ->init('init.mp4')->master('master.m3u8')
+            ->url($prefix)                      // written in front of every segment reference
+            ->flags([...]);                     // hls_flags; defaults to ['independent_segments']
 Output\Dash ->template(bool)->timeline(bool) // both false ⇒ explicit <SegmentList>/<SegmentURL>; default true/true
-            ->init($pattern)->media($pattern)->manifest('manifest.mpd');
+            ->init($pattern)->media($pattern)->manifest('manifest.mpd')->sets($definition);
 Output\Cmaf ->master('master.m3u8')->manifest('manifest.mpd')
             ->template(bool)->timeline(bool)->init($pattern);   // one fMP4 set, both manifests — see §4
+            // Extends Dash but inverts its defaults: template and timeline both start false, because
+            // explicit addressing is what keeps the two manifests in step over one segment set.
 
 // Thumb — thumbnail options
 (new Thumb())->time(null)      // null = auto: -vf thumbnail picks a representative frame; float = exact seek (s)
@@ -334,7 +358,12 @@ Info         // probe result — container + primary video/audio stream + full m
   audioCodec · audioFormat · audioBitrate (bps) · sampleRate · audioTracks [{codec, language}]
   tags []     // container-level descriptive metadata: title, artist, album, creation_time, encoder, …
   tracks: Track[] · chapters: Chapter[] · rotation (degrees, from the display matrix, else null)
+  cover       // stream index of embedded artwork, else null — a sound file reports no video but
+              //   may still have a picture, which is what grab() reaches for
   raw []      // full decoded backend payload — the genericness escape hatch
+  milliseconds(): int          // duration as most catalogues store it
+  ratio(): ?string             // aspect, derived from the frame size when the container omits one
+  tracks(string $type): Track[] // one stream kind, e.g. tracks(Track::SUBTITLE)
 
 Track        // every stream, not just the primary: index · type ('video'|'audio'|'subtitle'|'data')
              // codec · language · title · default (bool) · forced (bool) · tags []
@@ -348,25 +377,36 @@ Package      // pack() result — the structured source of truth (see §5)
   metadata(): array                        // MPD attrs (profiles, type, mediaPresentationDuration,
                                            // maxSegmentDuration, minBufferTime) + HLS attrs (version, targetDuration)
   duration(): float
+  variant(string $id): ?Variant            // one rung by name
+  size(): int                              // total bytes across every segment
 
 Variant      // id · type ('video'|'audio') · mimeType · codecs · bandwidth · width · height · sar
-             // sampleRate · timescale · startNumber · target · segments[] · playlist (path|null)
+             // sampleRate · language · timescale · startNumber · target · segments[] · playlist (path|null)
+             // resolution(): ?string — "1280x720", or null for an audio rung
 Segment      // variant · file · path · duration (0.0 for init) · init (bool) · number · size (bytes)
 Manifest     // type (Manifest::HLS | Manifest::DASH) · path · main (bool: master/mpd vs media playlist)
 
 Spritesheet  // images(): string[] · cues(): Cue[] · vtt(): ?string · files(): string[]
-Cue          // start · end · file · x · y · w · h        (structured #xywh — consumers rewrite URLs freely)
+             // width(): int · height(): int — one thumbnail's size, for a consumer sizing its own CSS
+             // render(?callable $url): string — the WebVTT body, each sheet URL rewritten by $url
+Cue          // start · end · file · x · y · width · height
+             // render(?string $url): string — one cue as structured #xywh, URL freely rewritten
 
-Progress     // percent (0–100, computed from Info::duration inside the adapter) · time · frame · fps · speed
+Progress     // percent (0–100, computed from $info->duration inside the adapter) · time · frame · fps · speed
 ```
 
 ### Exceptions
 
 ```php
 Exception extends \Exception                 // library base
-Exception\Input      // missing/unreadable/invalid source, bad chain state (e.g. encode() with 2 reps)
-Exception\Output     // Output combo unsupported by the chosen adapter (e.g. SegmentList on Shaka)
-Exception\Process    // backend command failed — command(): full argv, output(): stderr tail
+Exception\Input        // missing/unreadable/invalid source, bad chain state (e.g. encode() with 2 reps),
+                       //   and every rejected name, flag or pattern (§10.13)
+Exception\Unsupported  // the job cannot be expressed: a codec the output cannot carry (VP9 + CMAF),
+                       //   stream copy in an adaptive package, a keyframe interval longer than a
+                       //   segment, a segment container or display level that does not exist
+Exception\Runtime      // a backend command failed, or succeeded without writing what it promised —
+                       //   command(): full argv, output(): stderr tail, and the exit code as the
+                       //   exception code (§10.15)
 ```
 
 ### Deviations from v1
@@ -426,9 +466,10 @@ the same `.m4s` files**. Default backend: the FFmpeg dash muxer.
 ```
 
 Verified behavior (ffmpeg `dashenc.c` + formats docs, and reproduced live against the repo image's
-ffmpeg 7.1.1 build: one command over a test source produced a `SegmentList`/`SegmentURL`-only MPD,
+ffmpeg 8.1.2 build: one command over a test source produced a `SegmentList`/`SegmentURL`-only MPD,
 a VERSION-7 HLS master with an audio group, and `media_%d.m3u8` playlists with `EXT-X-MAP` — all
-referencing one shared `.m4s` segment set):
+referencing one shared `.m4s` segment set. Re-checked on 8.1.2 when the pin moved off 7.1: every gap
+below is still a gap, so every workaround is still load-bearing):
 
 - `-hls_playlist 1` writes a master plus one media playlist per stream that enumerate the **same
   concrete segment files** the MPD references — it works in both `SegmentTemplate` and `SegmentList`
@@ -436,14 +477,15 @@ referencing one shared `.m4s` segment set):
 - Media playlist names are **hardcoded** `media_%d.m3u8` (only the master name is configurable);
   `Package` records the stream-index → playlist mapping.
 - HLS output requires mp4 segments (`-dash_segment_type mp4` is forced by `Output\Cmaf`); VP9-in-CMAF
-  is therefore unsupported — `Packager\FFmpeg` throws `Exception\Output` for `Format\VP9` + `Cmaf`.
+  is therefore unsupported. The rejection is not the adapter's: `Arguments` checks the output's
+  protocol against `Format::supports()` before a command is built, so `Format\VP9` + `Cmaf` throws
+  `Exception\Unsupported` from any backend, and a new codec declares its own limits in one place.
 - `-single_file` is never used (byte-range playlists defeat per-segment addressing).
 - The dash muxer never writes `EXT-X-INDEPENDENT-SEGMENTS`. Since every segment starts on a forced
   keyframe the guarantee genuinely holds, so `pack()` post-appends the tag to the CMAF master —
   faster quality switching in players and clean Apple validation for one line of string editing.
-- Requires ffmpeg ≥ 4.1. The library targets the most mature LTS line — **7.1**, exactly what the
-  repo image builds and pins, and what CI therefore tests against. 4.1 remains the documented floor;
-  older lines are not exercised by CI.
+- Requires ffmpeg ≥ 4.1. The image builds and pins **8.1.2**, which is what CI tests against
+  (§10.7). 4.1 remains the documented floor; older lines are not exercised by CI.
 
 Why FFmpeg is the default, and why Shaka is deferred: one ffmpeg process does encode+package (no
 intermediate files), progress reporting exists, `SegmentList` MPDs are supported, and ffmpeg is
@@ -453,7 +495,7 @@ URLs from Shaka would have to rely on `Package::segments()` parsed from its HLS 
 always enumerate concrete files) rather than its MPD. That is exactly the dynamic-manifest mode
 described next.
 
-Standalone HLS fMP4 (`Output\Hls::type(Hls::FMP4)`) for completeness: `-hls_segment_type fmp4`,
+Standalone HLS fMP4 (`Output\Hls::segments(Hls::FMP4)`) for completeness: `-hls_segment_type fmp4`,
 `-hls_fmp4_init_filename`, `.m4s` segment extension, auto `EXT-X-MAP` + `EXT-X-VERSION:7`, plus
 `-hls_flags independent_segments`; `hls_allow_cache` is dropped in fMP4 mode (the tag was removed
 from the HLS spec at protocol version 7).
@@ -477,13 +519,22 @@ The internal parsers (`Parser\M3u8`, `Parser\Mpd`) are the single source of `seg
   `VERSION`; master parse yields `BANDWIDTH`/`CODECS`/`RESOLUTION`/audio groups per variant.
 - **Mpd**: `SegmentList` mode reads `<Initialization>`/`<SegmentURL>` plus
   `timescale`/`duration`/`startNumber` directly; `SegmentTemplate` mode is **expanded to concrete
-  segment names** (substituting `$RepresentationID$`, `$Number%0Nd$`, iterating `SegmentTimeline`
-  runs) so `segments()` is complete regardless of addressing mode.
-- **Integrity check**: after parsing, every referenced segment is `stat()`-ed (existence + byte
-  size). Any mismatch fails `pack()` with `Exception\Process` — a truncated run can never return a
-  plausible-looking `Package`.
+  segment names** (substituting `$RepresentationID$`, `$Number%0Nd$`, `$Bandwidth$` and `$Time$`,
+  iterating `SegmentTimeline` runs) so `segments()` is complete regardless of addressing mode.
+  `$Time$` is the running total of the durations declared ahead of a segment, and an `S@t` restarts
+  that clock rather than being added to it. Every identifier a name is *allowed* to carry is resolved
+  here, which is the rule that keeps the writing and reading halves in step: `Name::template()` and
+  this parser accept exactly the same set, so a template the library approved cannot produce a
+  manifest pointing at filenames nothing on disk is called. `$ext$` is the one identifier accepted
+  but never met, because the muxer resolves it while writing the manifest; `$SubNumber$` is refused,
+  because subsegment addressing is neither written nor read.
+- **Integrity check**: after parsing, every referenced segment is checked with `is_file()` and sized
+  with `filesize()`, and the size is what `Segment::$size` reports. A reference with nothing behind it
+  fails `pack()` with `Exception\Runtime` — a truncated run can never return a plausible-looking
+  `Package`.
 
-The same pattern applies to sprites: `Spritesheet::cues()` (structured `start/end/file/x/y/w/h`) is
+The same pattern applies to sprites: `Spritesheet::cues()` (structured
+`start/end/file/x/y/width/height`) is
 always populated; `Tile::vtt(false)` skips writing the `.vtt` file for consumers that generate their
 own timeline documents with rewritten URLs.
 
@@ -531,6 +582,9 @@ src/Video/
 ├── Info.php · Track.php · Chapter.php · Package.php · Variant.php        results
 ├── Segment.php · Manifest.php · Progress.php · Spritesheet.php · Cue.php
 ├── Exception.php · Exception/ Input.php · Unsupported.php · Runtime.php
+├── Reporter.php                               where status lines go
+├── Reporter/ Console.php · Silent.php          the terminal, or nowhere
+├── Name.php                                   @internal guards for caller-chosen strings
 ├── Decimal.php                                @internal shared number formatter
 ├── Process.php                                @internal proc_open + stream_select wrapper
 ├── Arguments.php · Arguments/ Hls.php · Dash.php · Cmaf.php   @internal argv builders
@@ -548,7 +602,11 @@ Exception names avoid colliding with the config and runner classes they sat besi
 
 `composer.json`: `"require": {"php": ">=8.2", "ext-dom": "*", "ext-json": "*",
 "utopia-php/console": "^0.2"}` — `ffmpeg`/`ffprobe` are external binaries, and console only prints the
-status line, behind the `Reporter` seam. The `php-ffmpeg/php-ffmpeg` dependency is
+status line, behind the `Reporter` seam. `ext-swoole` is a **suggest**, never a requirement: the
+library only has to keep yielding inside a coroutine, which is a property of how it is written rather
+than something it imports (§10.17). `swoole/ide-helper` sits in `require-dev` for editors —
+phpstan needs no help, since it resolves the Swoole symbols from stubs bundled in its own phar.
+The `php-ffmpeg/php-ffmpeg` dependency is
 dropped —
 v1 already bypassed its command model, and it was the root of the vendor-type leaks (`Format`
 extending `DefaultVideo`, `Probe` exposing `StreamCollection`) and the duration-less progress
@@ -559,7 +617,7 @@ listeners. `ffmpeg -progress pipe:1 -nostats` emits stable machine-readable `key
 
 | Today | v2 |
 |---|---|
-| `aminyazdanpanah/php-ffmpeg-video-streaming` fork: `$media->hls()/dash()` + `setAdditionalParams([...])` | `Packager\FFmpeg` fused pass; extra args → `Format::params()`; segment duration → `Output::segment()` |
+| `aminyazdanpanah/php-ffmpeg-video-streaming` fork: `$media->hls()/dash()` + `setAdditionalParams([...])` | `Adapter\FFmpeg` fused pass; extra args → `Format::params()`; segment duration → `Output::segment()` |
 | `use_template 0` / `use_timeline 0` fork patch | first-class: `Output\Dash::template(false)->timeline(false)` |
 | `Mhor\MediaInfo` + `FFProbe::isValid` | `Adapter\FFprobe` → `Info`; `valid()` on either facade. MediaInfo is gone: two probes meant two field-mapping surfaces to keep honest for no gain over `Info::$raw` |
 | `captioning/captioning` `SubripFile->convertTo('webvtt')` | **stays in the worker.** Subtitle conversion is not video work, needs no encoder, and the worker already owns the files |
@@ -570,7 +628,7 @@ listeners. `ffmpeg -progress pipe:1 -nostats` emits stable machine-readable `key
 | php-ffmpeg stderr-regex progress (duration never wired → dead listeners) | `-progress pipe:1 -nostats` → `Progress` with a real `percent` |
 | v1 `save()`/`run()`, `Representations`, `Output` mutated by the adapter | removed / restructured (§2) |
 | v1 HLS multi-rep bug: N reps → N positional outputs, each re-encoding everything and rewriting `master.m3u8` (last wins) | one command: video mapped once **per rung**, options indexed `:v:N`, a single `-var_stream_map "v:0,agroup:aud,name:360p v:1,… a:0,agroup:aud,default:yes"`, one `master_pl_name`, one `%v` output pattern |
-| Raw `exec()` / `Console::execute` shell strings | `Process` (@internal): argv arrays (no shell), line callbacks, timeout, `Exception\Process` with command + stderr tail |
+| Raw `exec()` / `Console::execute` shell strings | `Process` (@internal): argv arrays (no shell), line callbacks, timeout, `Exception\Runtime` with command, stderr tail and exit code |
 
 Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` second, `pack()` last
 (it changes the parsing/DB-write side from hand-rolled to `Package`).
@@ -587,7 +645,8 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
   from language tags with untagged tracks still carried, and the keyframe cadence falling back to the
   segment length (with an interval longer than a segment rejected).
 - `Parser\{M3u8,Mpd}` on fixture manifests: TS + fMP4 (`EXT-X-MAP`) playlists, `SegmentList` MPDs,
-  `SegmentTemplate` expansion (`$Number%05d$`, `$Bandwidth$`, `SegmentTimeline` `S@t/@d/@r` runs).
+  `SegmentTemplate` expansion (`$Number%05d$`, `$Bandwidth$`, `$Time$`, `SegmentTimeline` `S@t/@d/@r`
+  runs, including a timeline whose `S@t` restarts the clock rather than advancing it).
 - Probe JSON fixtures (ffprobe payloads): every `Info` field incl. `tags`, `chapters`, `tracks`
   (multi-track with embedded subtitles), `rotation`, `cover`, audio-only, missing-field defaults.
 - The facades against fakes: `Encoder` delegation, `Packager`'s fused-vs-staged choice, staged
@@ -604,14 +663,24 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
   offending rungs (the muxer says only "Conflicting stream aspect ratios", after it has started).
 - Config immutability: every setter on `Format`, `Output`, `Thumb` and `Tile`, table-driven —
   the return is a new instance, the receiver keeps its value, the copy carries the new one — plus
-  the sharing scenario itself (two holders of one preset configuring it independently). A
-  Swoole-gated E2E (`CoroutineTest`, skipped without ext-swoole) runs three coroutines, one
-  `Encoder` each, off one shared `Thumb` under `SWOOLE_HOOK_ALL`.
+  the sharing scenario itself (two holders of one preset configuring it independently). An E2E
+  (`CoroutineTest`) then proves the same thing under a real scheduler: three coroutines, one
+  `Encoder` each, off one shared `Thumb` under `SWOOLE_HOOK_ALL`, asserting that all three stills
+  were written, that none of the jobs failed, and that the shared `Thumb` came out unmutated. The
+  image ships ext-swoole so this runs rather than skips (§10.17) — it is the only test that shows
+  `proc_open` and `stream_select` genuinely yielding instead of deadlocking.
 - `Process`: fake scripts exercising exit codes, timeouts (including the stderr tail surviving the
   termination that ends them), stdout/stderr line callbacks, progress-block parsing, and a stream
-  that never sends a line break.
+  that never sends a line break. Plus how a run ended: a signalled command reports 128 + its signal,
+  a command that ignores `SIGTERM` is killed after the grace period and says so, and a command that
+  will not stop printing fails on the output cap instead of exhausting memory.
 - Names that would leave the directory they were given or break the argument they sit in
-  (`Representation`, `Output::name()`, manifest and playlist filenames, `Tile::name()`).
+  (`Representation`, `Output::name()`, manifest and playlist filenames, `Tile::name()`), and the
+  settings that reach argv without being filenames (`Hls::url()`, `Hls::flags()`, `Dash::sets()`),
+  each held to the rule its own use needs (§10.13).
+- Job lifecycle on the adapters: a ladder or format described before `open()` survives it, a terminal
+  clears the job it finished, and the next `open()` therefore starts from nothing rather than
+  inheriting it.
 - Status lines: reported through a `Reporter`, the terminal by default, whichever one a facade is
   given reaching every backend, and a quiet backend reporting nothing.
 - Display level: every backend starts at `ERROR`; a level can be raised or silenced; the factories
@@ -626,11 +695,13 @@ Consumers migrate incrementally: `probe()` is drop-in first, `tile()`/`grab()` s
 - CMAF: MPD, `master.m3u8`, and `media_0.m3u8` all reference the **same** `.m4s` files; the master
   carries the post-appended `EXT-X-INDEPENDENT-SEGMENTS` tag.
 - HEVC end-to-end (HLS fMP4, DASH, CMAF) and VP9 end-to-end (DASH) — both codecs are first-class;
-  impossible combos (VP9 + CMAF/HLS) throw `Exception\Output`.
-- `Package::segments()` sizes match `stat()`; `manifests(false)` leaves no playlist files;
+  impossible combos (VP9 + CMAF/HLS) throw `Exception\Unsupported`.
+- `Package::segments()` sizes match the files on disk; `manifests(false)` leaves no playlist files;
   `files()` uploads cleanly.
 - Progress fires with ascending `percent` reaching 100; audio-only input packs; `encode()`
-  produces a single playable file; `tile()` sprite count and cue math match fixture duration.
+  produces a single playable file; `tile()` sprite count and cue math match fixture duration, and
+  tiling a shorter source into a directory that already holds a longer run's sheets reports only
+  the sheets it wrote.
 - `grab()` writes a decodable image at the requested size (timed and auto modes); cover art is
   extracted from an audio fixture with embedded artwork; `probe()` reads a chaptered fixture.
 - The display level genuinely changes what ffmpeg reports: a clean encode emits no `LOG` lines at
@@ -655,13 +726,17 @@ written to read as sentences; where a name cannot (a leading acronym, or a digit
 as in `Mp4` → "Mp 4"), a `@testdox` annotation supplies the wording instead. A run therefore reads as
 a description of what the library does.
 
-CI: GitHub Actions matrix (PHP 8.2/8.3/8.4 against the pinned ffmpeg 7.1.1 the image builds), phpstan
+CI: GitHub Actions matrix (PHP 8.2/8.3/8.4 against the pinned ffmpeg 8.1.2 the image builds), phpstan
 at level **max** over `src` and `tests`, pint (`psr12`). All three run on pull requests and on pushes
 to `main`.
 The repo Dockerfile builds ffmpeg **from source**, pinned via the `FFMPEG_VERSION` build arg
 (GPL, with libx264/x265/vpx/opus/lame/theora/vorbis — exactly the `Format` presets and the sample
 library's codecs), in a stage that shares the runtime base image so codec shared libraries match
-ABI-for-ABI. Building with `TESTING=true` installs dev dependencies so `phpunit` runs in-image.
+ABI-for-ABI. ext-swoole is built the same way, pinned via `SWOOLE_VERSION`, in a stage of its own so
+it compiles alongside ffmpeg rather than after it. Both are then *asserted* in the final stage, not
+merely printed: a swoole that failed to load would otherwise turn the coroutine suite back into a
+skip, and a skipped test says nothing about being absent. Building with `TESTING=true` installs dev
+dependencies so `phpunit` runs in-image.
 
 ## 9a. Several audio languages, and where subtitles stop
 
@@ -710,19 +785,30 @@ All former open questions, resolved with the maintainer (2026-07-26):
    "Streaming" survives only where it is the domain term — adaptive streaming, live streaming, and
    the expansion of HLS.
 3. **HEVC / VP9**: full first-class support — both codecs integration-tested end-to-end (§9);
-   impossible combos (VP9 in CMAF/HLS) fail loudly with `Exception\Output` instead of degrading.
+   impossible combos (VP9 in CMAF/HLS) fail loudly with `Exception\Unsupported` instead of degrading.
 4. **Rate control**: capped CRF by default — `Representation` carries optional `maxrate`/`bufsize`,
-   auto-derived (`maxrate = video`, `bufsize = 2 × video`) when unset (§2).
+   auto-derived (`maxrate = video`, `bufsize = 2 × maxrate`) when unset (§2).
 5. **`EXT-X-INDEPENDENT-SEGMENTS`**: post-appended to CMAF masters (§4) — the guarantee genuinely
    holds and the edit costs one line.
 6. **Multi-audio**: every audio stream becomes a track, labelled with its language tag where it has
    one, first one is default (§2); explicit selection is a later additive option.
-7. **ffmpeg version**: target the most mature LTS line — 7.1, pinned in the repo image via the
-   `FFMPEG_VERSION` build arg, and the only line CI builds against; 4.1 is the documented floor.
+7. **ffmpeg version**: pin the newest release the suite actually passes on, via the `FFMPEG_VERSION`
+   build arg; 4.1 is the documented floor. Revised 2026-08-23 from "the most mature LTS line" (7.1):
+   with no consumers yet there is nothing to be conservative for, so the pin was walked forward
+   empirically instead. **8.1.2** is where it stopped. 9.0.1 does not work: ffmpeg **segfaults**
+   (SIGSEGV) decoding an MPEG-TS file that ffmpeg itself wrote, which took out packaging and stills
+   for that source while every other container passed. Nothing in our argv is implicated — a plain
+   `-vf scale` over the same input crashes just as readily, stderr is empty at `-loglevel error`, and
+   the 9.0 changelog removes nothing this library emits (`-psnr`, `-map_channel` and the old HLS
+   *protocol* handler, none of which we use). So the ceiling is upstream, not ours; revisit on 9.0.2.
+   The cost of moving lines is never the version string — it is re-verifying §4, because the CMAF
+   strategy is built on observed muxer gaps that a new release could quietly close.
 8. **`Adapter\Shaka`**: deferred to a later release rather than shipped as a stub — an untested
    adapter for an absent binary is a liability, and DRM (the reason Shaka exists here) is out of
    scope. What ships instead is the *seam*: the staged route, exercised by a pure-packager fake, so
    graduating Shaka is one new class plus a factory arm and no facade change (§1, §3).
+9. **Batch stills**: `grab()` stays one-frame-per-call; a `Thumb::count(n)` single-pass mode is
+   added only if looping proves a hot path.
 10. **Display level** (2026-07-31): one `LEVEL` constant per backend, defaulting to `ERROR`,
    overridable per instance and through the factories, mapped onto each binary's own verbosity flag.
    The library does not filter what a backend prints — it raises or lowers what the backend says and
@@ -731,8 +817,6 @@ All former open questions, resolved with the maintainer (2026-07-26):
    subtitle files, and their conversion needs no encoder; a second probe meant a second field-mapping
    surface to keep honest for no gain over `Info::$raw`. `probe()` still *reports* subtitle tracks
    (§9a) — reporting and packaging are different jobs.
-9. **Batch stills**: `grab()` stays one-frame-per-call; a `Thumb::count(n)` single-pass mode is
-   added only if looping proves a hot path.
 12. **Status lines behind a `Reporter`**: printing suits a command line and nothing else, so the
    destination is an interface — `Reporter\Console` by default, `Reporter\Silent` for anywhere stdout
    belongs to something else, and two methods for anyone bridging to a PSR-3 logger. Handed to
@@ -741,11 +825,44 @@ All former open questions, resolved with the maintainer (2026-07-26):
 13. **Names are validated, not trusted**: a representation, output, manifest or sprite name becomes a
    filename in a directory the caller named and, for renditions, an entry in `-var_stream_map`. Both
    uses break on separators, commas and spaces, so they are rejected at construction with
-   `Exception\Input` rather than joined onto a path and hoped for.
+   `Exception\Input` rather than joined onto a path and hoped for. The same reasoning reaches the
+   settings that are not filenames but still end up in the argument list, each with the rule its own
+   use needs rather than the strictest one going: `Hls::url()` is a URL or path prefix, so it may
+   carry separators but no whitespace (which would end the URI it is written in front of);
+   `Hls::flags()` are single words of muxer vocabulary; `Output\Dash::sets()` is free-form, because
+   the option's syntax owns its shape — spaces separate its groups and `descriptor=` carries XML — so
+   only what would break the argument list is refused. Nothing here is shell quoting: `Process` passes
+   argv arrays. What is being prevented is a value that reads as *another option*, which is why none
+   of the three may begin with a dash.
 14. **Keyframes follow segments**: a packaging job without an explicit `keyframe()` takes the segment
    length as its cadence, and an interval longer than a segment is rejected. Cuts land on keyframes,
    so the two were never independent — leaving them so meant a ladder built with the defaults could
    be segmented wherever the encoder happened to place a keyframe.
+15. **How a command ended is reported, not guessed** (2026-08-23): a process that has to be stopped is stopped in
+   stages — `SIGTERM`, `GRACE` seconds to explain itself, then `SIGKILL` — and the reason travels with
+   the failure. `Exception\Runtime` carries the exit code as its own code, using the shell's
+   128 + signal convention for anything that was signalled (143 for `SIGTERM`, 137 for `SIGKILL`), so a
+   timeout is distinguishable from a command that merely failed. Two things follow from the same
+   reasoning. Every pipe is drained during the grace period, not just stderr: a command blocked on a
+   full stdout pipe cannot act on the signal it was sent, so draining only the pipe we wanted to read
+   would hang exactly the case the grace period exists for. And collected output is bounded (`OUTPUT`,
+   8 MiB) rather than accumulated indefinitely — a backend stuck printing would otherwise exhaust
+   memory instead of failing, and a command that has produced megabytes of output where a JSON payload
+   or a filename was expected has already gone wrong.
+16. **A result describes the run that produced it** (2026-08-23): `tile()` clears the numbered sheets its own naming
+   would claim before writing any, so a job that produces fewer sheets than the last one cannot report
+   the previous run's leftovers among its `images()`. Only names this job could have written are
+   removed, matched exactly rather than by prefix, so an unrelated file sharing the directory survives.
+17. **Swoole is a test dependency, never a library one** (2026-08-23): following the house pattern from
+   `utopia-php/database` and `utopia-php/queue` — `ext-swoole` declared as a `suggest`,
+   `swoole/ide-helper` in `require-dev`, and the extension itself built from pinned source in the test
+   image. The library imports nothing from Swoole and must not: coroutine-safety here is a property of
+   construction (immutable config, one facade per coroutine, and a `Process` built on `proc_open`,
+   `stream_select` and `usleep`, all of which yield under the hooks). But a property nobody exercises
+   is a claim, not a guarantee, and this one matters more than most because the consumer that drives
+   these requirements runs Swoole workers. The extension was previously absent, so the one test that
+   proves it skipped itself on every run. Installing it costs a build stage that compiles in parallel
+   with ffmpeg, and buys the suite its first clean run with no skips at all.
 
 ## 11. Future: live streaming
 

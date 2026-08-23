@@ -36,7 +36,11 @@
     "require-dev": {
         "phpunit/phpunit": "9.*",
         "phpstan/phpstan": "^2.0",
-        "laravel/pint": "1.*"
+        "laravel/pint": "1.*",
+        "swoole/ide-helper": "6.2.2"
+    },
+    "suggest": {
+        "ext-swoole": "Needed to run the library inside Swoole coroutines."
     },
     "config": {
         "platform": {

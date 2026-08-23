@@ -115,7 +115,7 @@ class Mock extends Adapter implements Encoder, Packager, Probe
             return $path;
         } finally {
             // Both terminals end the job, as in the real adapters.
-            $this->inputs = [];
+            $this->done();
         }
     }
 
@@ -140,7 +140,7 @@ class Mock extends Adapter implements Encoder, Packager, Probe
             return $this->packed($dir, $output);
         } finally {
             // The job is over, so the next open() starts a new one.
-            $this->inputs = [];
+            $this->done();
         }
     }
 

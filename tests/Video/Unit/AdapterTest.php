@@ -161,6 +161,50 @@ class AdapterTest extends TestCase
     }
 
     /**
+     * The chain reads as well in one order as the other, so a ladder described
+     * before the source was opened has to survive the opening. It is the promise
+     * open() already makes about listeners: what was set on the adapter belongs
+     * to the caller, and only the previous job's leftovers are swept away.
+     */
+    public function testConfigurationSetBeforeOpeningSurvivesIt(): void
+    {
+        $adapter = new Mock();
+
+        $package = $adapter
+            ->add(new Representation(320, 240, 400))
+            ->output(new Hls())
+            ->open($this->file)
+            ->pack($this->dir);
+
+        $this->assertCount(1, $package->variants());
+        $this->assertNotEmpty($package->segments());
+    }
+
+    /**
+     * The other half of the same promise: configuring the next job before
+     * opening it must not inherit the finished one's ladder.
+     */
+    public function testANewJobConfiguredBeforeOpeningStartsClean(): void
+    {
+        $adapter = new Mock();
+
+        $adapter
+            ->open($this->file)
+            ->add(new Representation(320, 240, 400))
+            ->output(new Hls())
+            ->pack($this->dir);
+
+        $package = $adapter
+            ->add(new Representation(640, 480, 800))
+            ->output(new Hls())
+            ->open($this->file)
+            ->pack($this->dir);
+
+        $this->assertCount(1, $package->variants());
+        $this->assertSame(640, $package->variants()[0]->width);
+    }
+
+    /**
      * Packaging several already encoded renditions is what repeated open() calls
      * are for, so within one job they add rather than reset.
      */

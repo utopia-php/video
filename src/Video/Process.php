@@ -34,6 +34,9 @@ final class Process
     /** Seconds a killed command is given to explain itself. */
     private const GRACE = 2.0;
 
+    /** Bytes of collected output to hold before giving up on a command. */
+    private const OUTPUT = 8388608;
+
     /**
      * @param  list<string>  $command
      * @param  callable(string):void|null  $stdout  Called once per line written to stdout.
@@ -222,12 +225,22 @@ final class Process
     /**
      * A line listener that appends everything it is given to a string.
      *
+     * Collected output is held in memory, so a ceiling is part of the bargain:
+     * a command that will not stop talking is given up on rather than allowed
+     * to exhaust the process that ran it. The tail of stderr is bounded the
+     * same way inside the read loop. Pass 0 to collect without a limit.
+     *
      * @param  string  $into  Filled in as lines arrive.
+     * @param  int  $limit  Bytes to hold at most; 0 for no limit.
      * @return callable(string):void
      */
-    public static function collector(string &$into): callable
+    public static function collector(string &$into, int $limit = self::OUTPUT): callable
     {
-        return static function (string $line) use (&$into): void {
+        return static function (string $line) use (&$into, $limit): void {
+            if ($limit > 0 && \strlen($into) + \strlen($line) + 1 > $limit) {
+                throw new Runtime('Command produced more than '.$limit.' bytes of output');
+            }
+
             $into .= $line."\n";
         };
     }
@@ -268,15 +281,17 @@ final class Process
     ): Runtime {
         \proc_terminate($process, 15);
 
-        $pipe = $open[2] ?? null;
         $deadline = \microtime(true) + self::GRACE;
         $status = \proc_get_status($process);
 
         while ($status['running'] && \microtime(true) < $deadline) {
-            if ($pipe !== null) {
+            // Every pipe, not stderr alone: a backend blocked writing to a pipe
+            // nobody is draining cannot reach its own exit, and would have to be
+            // killed for it rather than being allowed to take the hint.
+            foreach ($open as $key => $pipe) {
                 $chunk = \fread($pipe, 8192);
 
-                if (\is_string($chunk) && $chunk !== '') {
+                if ($key === 2 && \is_string($chunk) && $chunk !== '') {
                     $errors = \substr($errors.$chunk, -self::TAIL);
                 }
             }
@@ -287,6 +302,14 @@ final class Process
 
         if ($status['running']) {
             \proc_terminate($process, 9);
+
+            // Being reaped is what fills in how it ended, and a killed process
+            // is gone almost at once. Without waiting for that the status still
+            // reads "running" and the failure carries no code at all.
+            for ($attempt = 0; $attempt < 50 && $status['running']; $attempt++) {
+                \usleep(2000);
+                $status = \proc_get_status($process);
+            }
         }
 
         foreach ($open as $handle) {
@@ -295,7 +318,27 @@ final class Process
 
         \proc_close($process);
 
-        return new Runtime($message, $command, \trim($errors));
+        return new Runtime($message, $command, \trim($errors), self::ended($status));
+    }
+
+    /**
+     * How a command that had to be stopped ended, as an exit code.
+     *
+     * proc_close() reports -1 once proc_get_status() has reaped the child, so
+     * the status is the only thing still holding the truth. A signalled process
+     * has no exit code of its own, so the shell's convention of 128 plus the
+     * signal is borrowed: it tells a command that took the hint (143) from one
+     * that had to be killed (137) from one that failed on its own.
+     *
+     * @param  array{running: bool, signaled: bool, termsig: int, exitcode: int}  $status
+     */
+    private static function ended(array $status): int
+    {
+        if ($status['signaled'] && $status['termsig'] > 0) {
+            return 128 + $status['termsig'];
+        }
+
+        return \max(0, $status['exitcode']);
     }
 
     /**

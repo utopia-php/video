@@ -376,7 +376,8 @@ needing a flag. Test method names are written to read as sentences; where a name
 `@testdox` annotation gives the wording instead.
 
 The end-to-end suite drives a real encoder, and the image builds FFmpeg from source (pinned with the
-`FFMPEG_VERSION` build arg) so it is reproducible:
+`FFMPEG_VERSION` build arg) so it is reproducible. It also builds `ext-swoole` (pinned with
+`SWOOLE_VERSION`), which is what lets the coroutine test above run for real rather than skip:
 
 ```bash
 docker compose exec tests vendor/bin/phpunit --testsuite e2e
@@ -424,7 +425,8 @@ extension.
 
 Locally, `composer test` runs both, `composer check` runs PHPStan and `composer lint` checks
 formatting (`composer format` fixes it). Tests that need an encoder skip themselves when one is not
-installed.
+installed, as does the coroutine test without `ext-swoole` — so run the suite in the image if you
+want the whole thing, since that is where both are guaranteed to be present.
 
 ## Copyright and license
 

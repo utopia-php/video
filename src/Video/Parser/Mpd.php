@@ -229,27 +229,42 @@ final class Mpd
         if ($timeline !== null) {
             $number = $start;
 
+            // Media time, in timescale units, of the segment about to be read.
+            // A name built from $Time$ is the running total of the durations
+            // declared ahead of it, so it has to be carried across entries.
+            $time = 0;
+
             foreach ($timeline->getElementsByTagName('S') as $entry) {
-                $length = ((float) $entry->getAttribute('d')) / $timescale;
+                $units = (int) $entry->getAttribute('d');
+                $length = $units / $timescale;
                 $repeat = $entry->hasAttribute('r') ? (int) $entry->getAttribute('r') : 0;
+
+                // An entry is free to say where it begins, which is how a
+                // timeline records a gap or starts its clock somewhere other
+                // than zero. Only when it says nothing does the total carry on.
+                if ($entry->hasAttribute('t')) {
+                    $time = (int) $entry->getAttribute('t');
+                }
 
                 for ($i = 0; $i <= $repeat; $i++) {
                     $segments[] = self::segment(
                         $id,
                         $dir,
-                        self::expand($media, $id, $number, $bandwidth),
+                        self::expand($media, $id, $number, $bandwidth, $time),
                         $length,
                         false,
                         $number,
                     );
                     $number++;
+                    $time += $units;
                 }
             }
 
             return [$segments, $timescale, $start];
         }
 
-        $length = ((float) $template->getAttribute('duration')) / $timescale;
+        $units = (int) $template->getAttribute('duration');
+        $length = $units / $timescale;
 
         if ($length <= 0 || $duration <= 0) {
             return [$segments, $timescale, $start];
@@ -262,7 +277,7 @@ final class Mpd
             $segments[] = self::segment(
                 $id,
                 $dir,
-                self::expand($media, $id, $number, $bandwidth),
+                self::expand($media, $id, $number, $bandwidth, $i * $units),
                 $length,
                 false,
                 $number,
@@ -275,15 +290,24 @@ final class Mpd
     /**
      * Substitutes the identifiers DASH allows inside a segment name.
      *
-     * $Number$ and $Bandwidth$ both take an optional printf width, which is how
-     * a manifest asks for zero padded names, and $$ is how it asks for a literal
-     * dollar sign.
+     * $Number$, $Bandwidth$ and $Time$ each take an optional printf width, which
+     * is how a manifest asks for zero padded names, and $$ is how it asks for a
+     * literal dollar sign. Every identifier a name is allowed to carry is
+     * resolved here: one left behind would be looked for on disk verbatim, and
+     * reported as a missing segment rather than as a name nothing understood.
+     *
+     * @param  int  $time  Media time of this segment, in timescale units.
      */
-    public static function expand(string $pattern, string $id, int $number, int $bandwidth = 0): string
-    {
+    public static function expand(
+        string $pattern,
+        string $id,
+        int $number,
+        int $bandwidth = 0,
+        int $time = 0,
+    ): string {
         $name = \str_replace('$RepresentationID$', $id, $pattern);
 
-        foreach (['Number' => $number, 'Bandwidth' => $bandwidth] as $identifier => $value) {
+        foreach (['Number' => $number, 'Bandwidth' => $bandwidth, 'Time' => $time] as $identifier => $value) {
             $name = \preg_replace_callback(
                 '/\$'.$identifier.'(%0?\d*d)?\$/',
                 // The width group needs at least "%d" to match, so it is either

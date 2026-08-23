@@ -1,5 +1,6 @@
-ARG FFMPEG_VERSION=7.1.1
+ARG FFMPEG_VERSION=8.1.2
 ARG PHP_VERSION=8.2
+ARG SWOOLE_VERSION=v6.2.2
 
 FROM php:${PHP_VERSION}-cli-alpine AS ffmpeg
 
@@ -30,6 +31,26 @@ RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" | t
     && /opt/ffmpeg/bin/ffmpeg -version \
     && rm -rf "/tmp/ffmpeg-${FFMPEG_VERSION}"
 
+# Built from source, pinned, in its own stage so it compiles alongside ffmpeg
+# rather than after it. Only the tests need it: the library itself has no swoole
+# dependency, it just has to keep yielding when a caller runs it in a coroutine,
+# and that is only provable with the real scheduler.
+FROM php:${PHP_VERSION}-cli-alpine AS swoole
+
+ARG SWOOLE_VERSION
+
+RUN apk add --no-cache \
+    build-base autoconf openssl-dev linux-headers git file \
+    && git clone --depth 1 --branch "${SWOOLE_VERSION}" https://github.com/swoole/swoole-src.git /tmp/swoole \
+    && cd /tmp/swoole \
+    && phpize \
+    && ./configure \
+    && make -j"$(nproc)" \
+    && make install \
+    && mkdir -p /ext \
+    && cp "$(php-config --extension-dir)/swoole.so" /ext/swoole.so \
+    && rm -rf /tmp/swoole
+
 FROM composer:2 AS vendor
 
 ARG TESTING=false
@@ -58,6 +79,16 @@ RUN apk add --no-cache \
 
 COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 
+COPY --from=swoole /ext/swoole.so /ext/swoole.so
+
+RUN cp /ext/swoole.so "$(php-config --extension-dir)/" \
+    && echo extension=swoole.so > /usr/local/etc/php/conf.d/swoole.ini \
+    && rm -rf /ext
+
+# Enough headroom for a cold phpstan run, which needs more than the 128M default.
+RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
+    && echo "memory_limit=1024M" >> "$PHP_INI_DIR/php.ini"
+
 WORKDIR /usr/src/code
 
 COPY --from=vendor /usr/local/src/vendor /usr/src/code/vendor
@@ -70,6 +101,10 @@ COPY ./phpunit.xml /usr/src/code/phpunit.xml
 COPY ./phpstan.neon /usr/src/code/phpstan.neon
 COPY ./pint.json /usr/src/code/pint.json
 
-RUN ffmpeg -version && ffprobe -version
+# Asserted rather than printed: without this the coroutine suite would go back to
+# skipping itself, and a skipped test is quiet about being absent.
+RUN ffmpeg -version && ffprobe -version \
+    && php --ri swoole > /dev/null \
+    && php -r 'exit(extension_loaded("swoole") ? 0 : 1);'
 
 CMD [ "tail", "-f", "/dev/null" ]

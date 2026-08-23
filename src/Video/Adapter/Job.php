@@ -32,12 +32,15 @@ trait Job
 
     protected ?Format $encoding = null;
 
+    /** Whether a job is being built up rather than waiting to be started. */
+    protected bool $started = false;
+
     /**
      * Register an input.
      *
-     * The first call of a job starts a new one, dropping everything the last
-     * job left behind; later calls add another already encoded rendition. Tag
-     * an input with the rung it represents when packaging several at once.
+     * The first call of a job starts it; later calls add another already encoded
+     * rendition. Tag an input with the rung it represents when packaging several
+     * at once.
      */
     public function open(string $path, ?Representation $as = null): static
     {
@@ -52,11 +55,20 @@ trait Job
      */
     protected function register(string $path, ?Representation $as = null): void
     {
-        if ($this->inputs === []) {
-            $this->restart();
+        // Validated before anything is remembered, so a source that turns out
+        // not to exist leaves the chain exactly as it was.
+        $input = ['path' => $this->source($path), 'rep' => $as];
+
+        if (! $this->started) {
+            // A job begins. Only the listeners are dropped: a finished job
+            // clears its own configuration, so whatever is set here was set by
+            // the caller for this job, and clearing it would silently discard a
+            // ladder described before the source was opened.
+            $this->forget();
+            $this->started = true;
         }
 
-        $this->inputs[] = ['path' => $this->source($path), 'rep' => $as];
+        $this->inputs[] = $input;
 
         if ($as !== null) {
             $this->reps[] = $as;
@@ -87,15 +99,18 @@ trait Job
     }
 
     /**
-     * Forget the previous job entirely, listeners included.
+     * The job is over, whether it succeeded or not.
+     *
+     * Called by every terminal, so that a job clears up after itself rather
+     * than leaving the next open() to guess what belonged to whom.
      */
-    protected function restart(): void
+    protected function done(): void
     {
         $this->inputs = [];
         $this->reps = [];
         $this->target = null;
         $this->encoding = null;
-        $this->forget();
+        $this->started = false;
     }
 
     /**

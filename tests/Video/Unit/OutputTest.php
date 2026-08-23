@@ -224,6 +224,70 @@ class OutputTest extends TestCase
     }
 
     /**
+     * The prefix is written in front of every segment reference in a playlist,
+     * where a line break or a space would end the URI, and it is handed to the
+     * muxer as one argument, where a leading dash would pass for an option.
+     */
+    public function testASegmentUrlPrefixHasToBeUsableInAPlaylist(): void
+    {
+        foreach (['has space', "two\nlines", '-hls_flags', "null\0byte"] as $prefix) {
+            try {
+                (new Hls())->url($prefix);
+                $this->fail('expected "'.$prefix.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a URL prefix', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame('https://cdn.example.com/v/', (new Hls())->url('https://cdn.example.com/v/')->prefix());
+        $this->assertSame('', (new Hls())->url('')->prefix());
+    }
+
+    /**
+     * Flags are muxer vocabulary, so anything that is not one word of it would
+     * arrive as a stray argument rather than as the flag it was meant to be.
+     */
+    public function testHlsFlagsHaveToBeSingleWords(): void
+    {
+        foreach ([['independent_segments', 'two words'], ['-flag'], [''], ["null\0byte"]] as $flags) {
+            try {
+                (new Hls())->flags($flags);
+                $this->fail('expected '.\json_encode($flags).' to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('HLS flag', $exception->getMessage());
+                $this->assertStringContainsString('not usable as a single word', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame(
+            ['independent_segments', 'delete_segments'],
+            (new Hls())->flags(['independent_segments', 'delete_segments'])->hlsFlags(),
+        );
+    }
+
+    /**
+     * An adaptation set definition carries the option's own syntax, so spaces
+     * and separators are part of it. What it may not do is pass for an option
+     * itself, which is the one way a value breaks the argument list it sits in.
+     */
+    public function testAnAdaptationSetDefinitionCannotPassForAnOption(): void
+    {
+        foreach (['-adaptation_sets', '', "id=0,streams=v\nid=1", "null\0byte"] as $definition) {
+            try {
+                (new Dash())->sets($definition);
+                $this->fail('expected "'.$definition.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as an argument', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame(
+            'id=0,streams=v id=1,streams=a',
+            (new Dash())->sets('id=0,streams=v id=1,streams=a')->adaptations(),
+        );
+    }
+
+    /**
      * A container the muxer does not know is a typo, and a typo found after an
      * hour of encoding is a typo found too late.
      */

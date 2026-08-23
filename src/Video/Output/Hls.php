@@ -91,6 +91,8 @@ final class Hls extends Output
      */
     public function url(string $url): static
     {
+        $url = Name::prefix($url, 'Segment URL prefix');
+
         $copy = clone $this;
         $copy->url = $url;
 
@@ -102,6 +104,10 @@ final class Hls extends Output
      */
     public function flags(array $flags): static
     {
+        foreach ($flags as $flag) {
+            Name::word($flag, 'HLS flag');
+        }
+
         $copy = clone $this;
         $copy->flags = $flags;
 

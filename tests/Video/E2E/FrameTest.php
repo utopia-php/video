@@ -181,6 +181,36 @@ class FrameTest extends Base
         $this->assertGreaterThanOrEqual(2, \count($files));
     }
 
+    /**
+     * Sheets are read back by walking the numbered files upward until one is
+     * missing, so tiling a shorter source into a directory a longer one has
+     * already used must not pick up the tail it left behind: those sheets show
+     * another timeline, and a consumer uploads whatever files() lists.
+     */
+    public function testTilingAgainDoesNotReportTheLastRunsSheets(): void
+    {
+        $options = (new Tile())->interval(2.0)->grid(2, 1);
+
+        // Eight seconds over two-cell sheets fills two of them; four seconds
+        // fills one, leaving the second behind.
+        $long = (new Encoder())->tile(self::video(), $this->dir, $options);
+        $short = (new Encoder())->tile(self::silent(), $this->dir, $options);
+
+        $this->assertCount(2, $long->images());
+        $this->assertCount(1, $short->images());
+
+        // The invariant behind the count: every sheet reported has to be one
+        // this timeline actually has cues for.
+        $this->assertLessThanOrEqual(
+            \count($short->images()) * $options->cells(),
+            \count($short->cues()),
+        );
+
+        foreach ($short->files() as $file) {
+            $this->assertWritten($file);
+        }
+    }
+
     public function testWritesAWebvttTimeline(): void
     {
         $sheet = (new Encoder())->tile(self::video(), $this->dir, (new Tile())->interval(2.0));

@@ -121,6 +121,53 @@ class ProcessTest extends TestCase
     }
 
     /**
+     * A command that had to be stopped is worth telling apart from one that
+     * failed on its own. proc_close() has nothing left to report once the child
+     * has been reaped, so the signal it died of is what the failure carries, by
+     * the shell's convention of 128 plus the signal number.
+     */
+    public function testAStoppedCommandReportsHowItWasStopped(): void
+    {
+        try {
+            Process::run(['sleep', '30'], timeout: 1);
+            $this->fail('Expected the command to time out');
+        } catch (Runtime $exception) {
+            $this->assertSame(143, $exception->getCode(), 'expected SIGTERM to be reported');
+        }
+    }
+
+    /**
+     * Asking is not the same as insisting. A command that will not take the
+     * hint is killed outright once its grace period is up, and says so.
+     */
+    public function testACommandThatWillNotStopIsKilled(): void
+    {
+        try {
+            Process::run(['sh', '-c', 'trap "" TERM; sleep 30'], timeout: 1);
+            $this->fail('Expected the command to time out');
+        } catch (Runtime $exception) {
+            $this->assertSame(137, $exception->getCode(), 'expected SIGKILL to be reported');
+        }
+    }
+
+    /**
+     * Collected output is held in memory, so a command that never stops talking
+     * has to be cut off rather than allowed to exhaust the process running it.
+     * The tail of stderr has always been bounded; this is the other half.
+     */
+    public function testACollectorRefusesMoreThanItWasAllowed(): void
+    {
+        $output = '';
+
+        try {
+            Process::run(['sh', '-c', 'yes utopia'], Process::collector($output, 64));
+            $this->fail('Expected the collector to give up');
+        } catch (Runtime $exception) {
+            $this->assertStringContainsString('more than 64 bytes', $exception->getMessage());
+        }
+    }
+
+    /**
      * Nothing obliges a stream to send line breaks, and a backend writing
      * something binary never will, so the buffer is handed over once it has
      * grown past a plausible line rather than held until the command ends.

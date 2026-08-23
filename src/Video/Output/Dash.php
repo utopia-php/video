@@ -97,6 +97,8 @@ class Dash extends Output
      */
     public function sets(string $definition): static
     {
+        $definition = Name::argument($definition, 'Adaptation set definition');
+
         $copy = clone $this;
         $copy->sets = $definition;
 

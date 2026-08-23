@@ -355,6 +355,80 @@ class ParserMpdTest extends TestCase
         $this->assertSame('chunk-stream0-00002.m4s', $variant->segments[2]->file);
     }
 
+    /**
+     * $Time$ is the one identifier only a timeline can resolve: a segment is
+     * named for the media time it starts at, which is the running total of the
+     * durations declared before it rather than anything on the segment itself.
+     */
+    public function testExpandsATemplateNamedByTime(): void
+    {
+        $this->write('init-stream0.m4s', 'init');
+        $this->write('chunk-stream0-0.m4s', 'a');
+        $this->write('chunk-stream0-6000.m4s', 'b');
+        $this->write('chunk-stream0-12000.m4s', 'c');
+
+        $manifest = $this->write('manifest.mpd', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT18.0S">
+              <Period>
+                <AdaptationSet id="0" contentType="video">
+                  <Representation id="0" mimeType="video/mp4" bandwidth="800000" width="640" height="360">
+                    <SegmentTemplate timescale="1000" startNumber="1"
+                                     initialization="init-stream$RepresentationID$.m4s"
+                                     media="chunk-stream$RepresentationID$-$Time$.m4s">
+                      <SegmentTimeline>
+                        <S t="0" d="6000" r="2"/>
+                      </SegmentTimeline>
+                    </SegmentTemplate>
+                  </Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            XML);
+
+        $variant = Mpd::read($manifest, $this->dir)['variants'][0];
+
+        $this->assertCount(4, $variant->segments);
+        $this->assertSame('chunk-stream0-0.m4s', $variant->segments[1]->file);
+        $this->assertSame('chunk-stream0-6000.m4s', $variant->segments[2]->file);
+        $this->assertSame('chunk-stream0-12000.m4s', $variant->segments[3]->file);
+    }
+
+    /**
+     * A timeline may restart its clock, and a segment named for its start time
+     * has to follow the declaration rather than counting on from the last run.
+     */
+    public function testATimelineRestartingItsClockIsFollowed(): void
+    {
+        $this->write('chunk-0-0.m4s', 'a');
+        $this->write('chunk-0-9000.m4s', 'b');
+
+        $manifest = $this->write('manifest.mpd', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT12.0S">
+              <Period>
+                <AdaptationSet id="0" contentType="video">
+                  <Representation id="0" mimeType="video/mp4" bandwidth="800000">
+                    <SegmentTemplate timescale="1000" startNumber="1"
+                                     media="chunk-$RepresentationID$-$Time$.m4s">
+                      <SegmentTimeline>
+                        <S t="0" d="3000"/>
+                        <S t="9000" d="3000"/>
+                      </SegmentTimeline>
+                    </SegmentTemplate>
+                  </Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            XML);
+
+        $variant = Mpd::read($manifest, $this->dir)['variants'][0];
+
+        $this->assertCount(2, $variant->segments);
+        $this->assertSame('chunk-0-0.m4s', $variant->segments[0]->file);
+        $this->assertSame('chunk-0-9000.m4s', $variant->segments[1]->file);
+    }
+
     public function testAudioAdaptationSetIsRecognised(): void
     {
         $this->write('init-1.m4s', 'init');
