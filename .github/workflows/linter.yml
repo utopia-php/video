@@ -1,0 +1,26 @@
+name: "Linter"
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Linter
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # Platform requirements are enforced here as they are in the image the
+      # tests run in: a dependency that could not run on a supported PHP should
+      # fail the job rather than install and be linted anyway.
+      - name: Run Linter
+        run: |
+          docker run --rm -v $PWD:/app composer:2 sh -c \
+          "composer install --profile && composer lint"

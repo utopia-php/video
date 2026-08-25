@@ -1,0 +1,50 @@
+{
+    "name": "utopia-php/video",
+    "description": "A simple library to probe, encode and package video for adaptive streaming",
+    "type": "library",
+    "keywords": ["php", "framework", "upf", "utopia", "streaming", "video", "hls", "dash", "cmaf", "ffmpeg"],
+    "license": "MIT",
+    "minimum-stability": "stable",
+    "authors": [
+        {
+            "name": "Shimon Newman",
+            "email": "shimon@appwrite.io"
+        }
+    ],
+    "autoload": {
+        "psr-4": {"Utopia\\Video\\": "src/Video"}
+    },
+    "autoload-dev": {
+        "psr-4": {"Utopia\\Tests\\": "tests/Video"}
+    },
+    "scripts": {
+        "test": "./vendor/bin/phpunit --configuration phpunit.xml",
+        "test:unit": "./vendor/bin/phpunit --configuration phpunit.xml --testsuite unit",
+        "test:e2e": "./vendor/bin/phpunit --configuration phpunit.xml --testsuite e2e",
+        "samples": "@php -r \"require 'vendor/autoload.php'; Utopia\\\\Tests\\\\Samples::build();\"",
+        "samples:rebuild": "@php -r \"require 'vendor/autoload.php'; Utopia\\\\Tests\\\\Samples::build(true);\"",
+        "check": "./vendor/bin/phpstan analyse --memory-limit=512M",
+        "format": "./vendor/bin/pint",
+        "lint": "./vendor/bin/pint --test"
+    },
+    "require": {
+        "php": ">=8.2",
+        "ext-dom": "*",
+        "ext-json": "*",
+        "utopia-php/console": "0.1.* || ^0.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "9.*",
+        "phpstan/phpstan": "^2.0",
+        "laravel/pint": "1.*",
+        "swoole/ide-helper": "6.2.2"
+    },
+    "suggest": {
+        "ext-swoole": "Needed to run the library inside Swoole coroutines."
+    },
+    "config": {
+        "platform": {
+            "php": "8.2"
+        }
+    }
+}

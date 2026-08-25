@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    testdox turns every test method name into a sentence and prints it with its
+    result, one line per test, so a run reads as a description of what the
+    library does rather than a row of dots. Method names are written to suit it.
+-->
+<phpunit backupGlobals="false"
+         backupStaticAttributes="false"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         convertErrorsToExceptions="true"
+         convertNoticesToExceptions="true"
+         convertWarningsToExceptions="true"
+         processIsolation="false"
+         stopOnFailure="false"
+         testdox="true"
+>
+    <testsuites>
+        <testsuite name="unit">
+            <directory>./tests/Video/Unit</directory>
+        </testsuite>
+        <testsuite name="e2e">
+            <directory>./tests/Video/E2E</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>

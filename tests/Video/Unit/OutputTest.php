@@ -1,0 +1,324 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Utopia\Tests\Unit;
+
+use PHPUnit\Framework\TestCase;
+use Utopia\Video\Exception\Input;
+use Utopia\Video\Exception\Unsupported;
+use Utopia\Video\Output;
+use Utopia\Video\Output\Cmaf;
+use Utopia\Video\Output\Dash;
+use Utopia\Video\Output\Hls;
+use Utopia\Video\Thumb;
+
+class OutputTest extends TestCase
+{
+    /**
+     * @testdox Every output shares the same defaults
+     */
+    public function testSharedDefaults(): void
+    {
+        foreach ([new Hls(), new Dash(), new Cmaf()] as $output) {
+            $this->assertSame(6.0, $output->duration());
+            $this->assertTrue($output->keeps());
+            $this->assertSame('stream', $output->base());
+            $this->assertSame([], $output->extra());
+        }
+    }
+
+    /**
+     * @testdox Each output reports which kind of stream it is
+     */
+    public function testTypes(): void
+    {
+        $this->assertSame(Output::HLS, (new Hls())->type());
+        $this->assertSame(Output::DASH, (new Dash())->type());
+        $this->assertSame(Output::CMAF, (new Cmaf())->type());
+    }
+
+    public function testHlsDefaultsToTransportStream(): void
+    {
+        $hls = new Hls();
+
+        $this->assertFalse($hls->fragmented());
+        $this->assertSame('ts', $hls->extension());
+        $this->assertSame('master.m3u8', $hls->masterFile());
+        $this->assertSame(['independent_segments'], $hls->hlsFlags());
+    }
+
+    /**
+     * @testdox HLS in fMP4 mode asks for an init segment
+     */
+    public function testHlsFragmentedMp4(): void
+    {
+        $hls = (new Hls())->segments(Hls::FMP4);
+
+        $this->assertTrue($hls->fragmented());
+        $this->assertSame('m4s', $hls->extension());
+    }
+
+    public function testDashDefaultsToTemplatedAddressing(): void
+    {
+        $dash = new Dash();
+
+        $this->assertTrue($dash->templated());
+        $this->assertTrue($dash->timelined());
+        $this->assertFalse($dash->listed());
+        $this->assertSame('manifest.mpd', $dash->manifestFile());
+    }
+
+    public function testDashListsSegmentsOnlyWhenBothSwitchesAreOff(): void
+    {
+        $this->assertFalse((new Dash())->template(false)->listed());
+        $this->assertFalse((new Dash())->timeline(false)->listed());
+        $this->assertTrue((new Dash())->template(false)->timeline(false)->listed());
+    }
+
+    /**
+     * Both manifests have to describe the same segments, so CMAF starts from
+     * explicit addressing rather than a formula.
+     */
+    public function testCmafListsSegmentsByDefault(): void
+    {
+        $cmaf = new Cmaf();
+
+        $this->assertTrue($cmaf->listed());
+        $this->assertSame('master.m3u8', $cmaf->masterFile());
+        $this->assertSame('manifest.mpd', $cmaf->manifestFile());
+    }
+
+    public function testNamingFlowsIntoSegmentPatterns(): void
+    {
+        $dash = (new Dash())->name('video');
+
+        $this->assertStringStartsWith('video_init_', $dash->initPattern());
+        $this->assertStringStartsWith('video_chunk_', $dash->mediaPattern());
+    }
+
+    public function testAdaptationSetsFollowTheStreamsPresent(): void
+    {
+        $dash = new Dash();
+
+        $this->assertSame('id=0,streams=v id=1,streams=a', $dash->adaptations(1, 1));
+        $this->assertSame('id=0,streams=v', $dash->adaptations(1, 0));
+        $this->assertSame('custom', $dash->sets('custom')->adaptations(1, 1));
+    }
+
+    /**
+     * Languages are separate choices rather than bitrate alternatives, so each
+     * needs its own set — that is also the only place DASH records a language.
+     */
+    public function testEachAudioTrackBeyondTheFirstGetsItsOwnAdaptationSet(): void
+    {
+        $dash = new Dash();
+
+        // One video rung, so audio output streams start at 1.
+        $this->assertSame(
+            'id=0,streams=v id=1,streams=1 id=2,streams=2 id=3,streams=3',
+            $dash->adaptations(1, 3),
+        );
+
+        // Three rungs push the audio along to streams 3 and 4.
+        $this->assertSame(
+            'id=0,streams=v id=1,streams=3 id=2,streams=4',
+            $dash->adaptations(3, 2),
+        );
+    }
+
+    public function testAudioOnlyOutputHasNoVideoAdaptationSet(): void
+    {
+        $this->assertSame('id=0,streams=a', (new Dash())->adaptations(0, 1));
+    }
+
+    /**
+     * Adapters read configuration but must never write back into it, or the
+     * same object could not be reused for a second job.
+     */
+    public function testConfigurationIsReusable(): void
+    {
+        $output = (new Hls())->segment(4)->name('shared');
+
+        $this->assertSame(4.0, $output->duration());
+        $this->assertSame('shared', $output->base());
+        $this->assertSame(4.0, $output->duration());
+        $this->assertSame('shared', $output->base());
+    }
+
+    public function testManifestsCanBeTurnedOff(): void
+    {
+        $this->assertFalse((new Hls())->manifests(false)->keeps());
+    }
+
+    /**
+     * The base name is joined onto the output directory to build every filename,
+     * so a name that walks back out of it is refused rather than followed.
+     *
+     * @testdox A base name that leaves the output directory is rejected
+     */
+    public function testBaseNameCannotEscapeTheOutputDirectory(): void
+    {
+        foreach (['../escape', '/etc/passwd', 'sub/dir', '', 'with space', "null\0byte"] as $name) {
+            try {
+                (new Hls())->name($name);
+                $this->fail('expected "'.$name.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a name', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testManifestAndPlaylistFilenamesHaveToBePlainNames(): void
+    {
+        foreach ([Hls::class, Cmaf::class] as $class) {
+            try {
+                /** @var Hls|Cmaf $output */
+                $output = new $class();
+                $output->master('../master.m3u8');
+                $this->fail('expected a traversing master name to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a filename', $exception->getMessage());
+            }
+        }
+
+        $this->expectException(Input::class);
+
+        (new Dash())->manifest('/tmp/manifest.mpd');
+    }
+
+    public function testAnInitSegmentNameStillHasToBeAFilename(): void
+    {
+        $this->assertSame('start.mp4', (new Hls())->init('start.mp4')->initFile());
+
+        $this->expectException(Input::class);
+
+        (new Hls())->init('../init.mp4');
+    }
+
+    public function testDashSegmentPatternsCannotLeaveTheOutputDirectory(): void
+    {
+        foreach (
+            [
+                '../chunk_$Number$.m4s',
+                'nested/chunk_$Number$.m4s',
+                'nested\\chunk_$Number$.m4s',
+                '/tmp/chunk_$Number$.m4s',
+                'chunk_$Unknown$.m4s',
+            ] as $pattern
+        ) {
+            try {
+                (new Dash())->media($pattern);
+                $this->fail('expected "'.$pattern.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a DASH filename template', $exception->getMessage());
+            }
+        }
+
+        $output = (new Dash())
+            ->init('init_$RepresentationID$.$ext$')
+            ->media('chunk_$RepresentationID$_$Number%05d$.$ext$');
+
+        $this->assertSame('init_$RepresentationID$.$ext$', $output->initPattern());
+        $this->assertSame('chunk_$RepresentationID$_$Number%05d$.$ext$', $output->mediaPattern());
+    }
+
+    /**
+     * The prefix is written in front of every segment reference in a playlist,
+     * where a line break or a space would end the URI, and it is handed to the
+     * muxer as one argument, where a leading dash would pass for an option.
+     */
+    public function testASegmentUrlPrefixHasToBeUsableInAPlaylist(): void
+    {
+        foreach (['has space', "two\nlines", '-hls_flags', "null\0byte"] as $prefix) {
+            try {
+                (new Hls())->url($prefix);
+                $this->fail('expected "'.$prefix.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as a URL prefix', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame('https://cdn.example.com/v/', (new Hls())->url('https://cdn.example.com/v/')->prefix());
+        $this->assertSame('', (new Hls())->url('')->prefix());
+    }
+
+    /**
+     * Flags are muxer vocabulary, so anything that is not one word of it would
+     * arrive as a stray argument rather than as the flag it was meant to be.
+     */
+    public function testHlsFlagsHaveToBeSingleWords(): void
+    {
+        foreach ([['independent_segments', 'two words'], ['-flag'], [''], ["null\0byte"]] as $flags) {
+            try {
+                (new Hls())->flags($flags);
+                $this->fail('expected '.\json_encode($flags).' to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('HLS flag', $exception->getMessage());
+                $this->assertStringContainsString('not usable as a single word', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame(
+            ['independent_segments', 'delete_segments'],
+            (new Hls())->flags(['independent_segments', 'delete_segments'])->hlsFlags(),
+        );
+    }
+
+    /**
+     * An adaptation set definition carries the option's own syntax, so spaces
+     * and separators are part of it. What it may not do is pass for an option
+     * itself, which is the one way a value breaks the argument list it sits in.
+     */
+    public function testAnAdaptationSetDefinitionCannotPassForAnOption(): void
+    {
+        foreach (['-adaptation_sets', '', "id=0,streams=v\nid=1", "null\0byte"] as $definition) {
+            try {
+                (new Dash())->sets($definition);
+                $this->fail('expected "'.$definition.'" to be rejected');
+            } catch (Input $exception) {
+                $this->assertStringContainsString('not usable as an argument', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame(
+            'id=0,streams=v id=1,streams=a',
+            (new Dash())->sets('id=0,streams=v id=1,streams=a')->adaptations(),
+        );
+    }
+
+    /**
+     * A container the muxer does not know is a typo, and a typo found after an
+     * hour of encoding is a typo found too late.
+     */
+    public function testAnUnknownHlsSegmentContainerIsRejected(): void
+    {
+        $this->expectException(Unsupported::class);
+
+        (new Hls())->segments('mp4');
+    }
+
+    public function testBothHlsSegmentContainersAreAccepted(): void
+    {
+        $this->assertSame('ts', (new Hls())->segments(Hls::MPEGTS)->extension());
+        $this->assertSame('m4s', (new Hls())->segments(Hls::FMP4)->extension());
+    }
+
+    public function testThumbDefaults(): void
+    {
+        $thumb = new Thumb();
+
+        $this->assertNull($thumb->at());
+        $this->assertSame(320, $thumb->size());
+        $this->assertSame(2, $thumb->scale());
+    }
+
+    public function testThumbIsConfigurable(): void
+    {
+        $thumb = (new Thumb())->time(12.5)->width(640)->quality(4);
+
+        $this->assertSame(12.5, $thumb->at());
+        $this->assertSame(640, $thumb->size());
+        $this->assertSame(4, $thumb->scale());
+    }
+}
