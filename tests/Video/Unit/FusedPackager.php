@@ -44,4 +44,9 @@ class FusedPackager extends FakePackager implements Encoder
     {
         return new Spritesheet([$dir.'/sprite1.jpg'], []);
     }
+
+    public function subtitle(string $path, int $stream, string $output, ?int $timeout = null): string
+    {
+        return $output;
+    }
 }

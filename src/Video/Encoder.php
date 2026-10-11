@@ -105,6 +105,14 @@ class Encoder
     }
 
     /**
+     * Write one text subtitle stream as WebVTT and return its path.
+     */
+    public function subtitle(string $path, int $stream, string $output, ?int $timeout = null): string
+    {
+        return $this->adapter->subtitle($path, $stream, $output, $timeout);
+    }
+
+    /**
      * Start a job. Anything configured by a previous one is discarded, listeners
      * excepted: those belong to this object and outlive the job. See off().
      */

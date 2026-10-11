@@ -26,6 +26,7 @@ use Utopia\Video\Representation;
 use Utopia\Video\Spritesheet;
 use Utopia\Video\Thumb;
 use Utopia\Video\Tile;
+use Utopia\Video\Track;
 
 /**
  * Everything the ffmpeg binary can do, behind one class.
@@ -255,6 +256,45 @@ class FFmpeg extends Adapter implements Encoder, Packager
 
         $output = $this->wrote($output);
         $this->reportSuccess(self::NAME.': grabbed '.$output);
+
+        return $output;
+    }
+
+    public function subtitle(string $path, int $stream, string $output, ?int $timeout = null): string
+    {
+        $path = $this->source($path);
+        $info = $this->prober()->read($path);
+        $found = false;
+
+        foreach ($info->tracks(Track::SUBTITLE) as $track) {
+            if ($track->index === $stream) {
+                $found = true;
+
+                break;
+            }
+        }
+
+        // Image subtitles (PGS, VobSub) are tracks too, but ffmpeg cannot turn
+        // pictures into text; that failure surfaces from the run itself.
+        if (! $found) {
+            throw new Input(self::NAME.': source "'.$path.'" has no subtitle stream '.$stream);
+        }
+
+        $this->directory(\dirname($output));
+
+        $args = $this->prefix(progress: false);
+        $args[] = '-i';
+        $args[] = $path;
+        $args[] = '-map';
+        $args[] = '0:'.$stream;
+        $args[] = '-c:s';
+        $args[] = 'webvtt';
+        $args[] = $output;
+
+        $this->process($args, null, null, $timeout);
+
+        $output = $this->wrote($output);
+        $this->reportSuccess(self::NAME.': extracted subtitle stream '.$stream.' to '.$output);
 
         return $output;
     }

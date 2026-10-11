@@ -95,6 +95,11 @@ class FakeEncoder implements Encoder
         return new Spritesheet([$dir.'/sprite1.jpg'], []);
     }
 
+    public function subtitle(string $path, int $stream, string $output, ?int $timeout = null): string
+    {
+        return $output;
+    }
+
     public function getName(): string
     {
         return 'fake';

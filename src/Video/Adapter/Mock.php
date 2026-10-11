@@ -46,6 +46,9 @@ class Mock extends Adapter implements Encoder, Packager, Probe
 
     private bool $audio = true;
 
+    /** Text subtitle tracks the pretend source carries, numbered after the audio one. */
+    private int $subtitles = 0;
+
     /**
      * Describe the source this Mock should pretend to have been given.
      */
@@ -54,11 +57,13 @@ class Mock extends Adapter implements Encoder, Packager, Probe
         int $width = 640,
         int $height = 480,
         bool $audio = true,
+        int $subtitles = 0,
     ): static {
         $this->duration = $duration;
         $this->width = $width;
         $this->height = $height;
         $this->audio = $audio;
+        $this->subtitles = $subtitles;
 
         return $this;
     }
@@ -218,6 +223,33 @@ class Mock extends Adapter implements Encoder, Packager, Probe
         return $output;
     }
 
+    public function subtitle(string $path, int $stream, string $output, ?int $timeout = null): string
+    {
+        $this->source($path);
+        $found = false;
+
+        foreach ($this->tracks() as $track) {
+            if ($track->index === $stream && $track->type === Track::SUBTITLE) {
+                $found = true;
+
+                break;
+            }
+        }
+
+        if (! $found) {
+            throw new Input(self::NAME.': source "'.$path.'" has no subtitle stream '.$stream);
+        }
+
+        $this->directory(\dirname($output));
+
+        \file_put_contents($output, "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nmock cue\n");
+
+        $output = $this->wrote($output);
+        $this->reportSuccess(self::NAME.': extracted subtitle stream '.$stream.' to '.$output);
+
+        return $output;
+    }
+
     public function tile(string $path, string $dir, ?Tile $options = null): Spritesheet
     {
         $this->source($path);
@@ -307,6 +339,10 @@ class Mock extends Adapter implements Encoder, Packager, Probe
 
         if ($this->audio) {
             $tracks[] = new Track(index: \count($tracks), type: Track::AUDIO, codec: 'aac');
+        }
+
+        for ($i = 0; $i < $this->subtitles; $i++) {
+            $tracks[] = new Track(index: \count($tracks), type: Track::SUBTITLE, codec: 'subrip', language: 'und');
         }
 
         return $tracks;
