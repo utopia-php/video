@@ -148,12 +148,17 @@ $encoder = new Encoder();
 
 $encoder->grab('/path/to/video.mp4', '/out/poster.jpg', (new Thumb())->width(640));
 $sheet = $encoder->tile('/path/to/video.mp4', '/out/timeline');
+$encoder->subtitle('/path/to/video.mkv', 2, '/out/eng.vtt', timeout: 60); // stream 2 as WebVTT
 
 $sheet->cues();   // list<Cue> with start, end, x, y, width, height
 $sheet->render(fn (string $file) => "/preview/{$file}"); // WebVTT with your own URLs
 ```
 
 Given a file with no video but embedded artwork, `grab()` finds the picture rather than failing.
+
+`subtitle()` takes the container stream index that `probe()` reports on a `Track` and writes that
+text track as WebVTT. Image subtitles (PGS, VobSub) cannot become text, so filter on the track's
+codec first; a stream that is not a subtitle is refused with an `Input` exception.
 
 ## Adapters
 
@@ -192,7 +197,7 @@ Every adapter has a display level, defaulting to `Adapter::ERROR` — only what 
 the interesting output of an encode is the file it wrote, not its commentary. Raise it when
 something needs explaining; whatever the backend then prints arrives as `LOG` events.
 
-Finished **encode / pack / grab / tile** jobs also report a status line — green via
+Finished **encode / pack / grab / tile / subtitle** jobs also report a status line — green via
 `Utopia\Console::success`, and red via `Console::error` for a failed backend command before the
 exception is thrown. Probe stays quiet on success. `Adapter::QUIET` suppresses both status lines as
 well as `LOG` events; progress events keep firing at every level, because progress is structured

@@ -48,4 +48,12 @@ interface Encoder extends Named, Observable
      * Write sprite sheets covering the whole timeline.
      */
     public function tile(string $path, string $dir, ?Tile $options = null): Spritesheet;
+
+    /**
+     * Write one text subtitle stream as WebVTT and return its path.
+     *
+     * @param  int  $stream  The container stream index, as Track::$index reports it.
+     * @param  int|null  $timeout  Seconds before the run is halted; null keeps the adapter's own.
+     */
+    public function subtitle(string $path, int $stream, string $output, ?int $timeout = null): string;
 }

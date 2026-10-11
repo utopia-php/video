@@ -104,6 +104,26 @@ class MockTest extends Adapters
         (new Encoder($adapter, $adapter))->grab($this->source(), $this->dir.'/still.jpg');
     }
 
+    public function testWritesAPretendSubtitleStream(): void
+    {
+        $adapter = (new Mock())->pretend(subtitles: 1);
+
+        $path = (new Encoder($adapter, $adapter))->subtitle($this->source(), 2, $this->dir.'/eng.vtt');
+
+        $this->assertSame($this->dir.'/eng.vtt', $path);
+        $this->assertStringStartsWith("WEBVTT\n", (string) \file_get_contents($path));
+    }
+
+    public function testRefusesToExtractAStreamThatIsNotASubtitle(): void
+    {
+        $this->expectException(Input::class);
+        $this->expectExceptionMessage('no subtitle stream 0');
+
+        $adapter = new Mock();
+
+        (new Encoder($adapter, $adapter))->subtitle($this->source(), 0, $this->dir.'/nothing.vtt');
+    }
+
     public function testRefusesToTileASourceWithNoDuration(): void
     {
         $adapter = (new Mock())->pretend(duration: 0.0);
