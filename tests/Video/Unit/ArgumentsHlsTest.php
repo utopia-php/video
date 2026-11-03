@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Arguments\Hls as Arguments;
 use Utopia\Video\Exception\Input;
@@ -211,9 +212,7 @@ class ArgumentsHlsTest extends TestCase
         $this->assertStringNotContainsString('language:und', $argv);
     }
 
-    /**
-     * @testdox A partly tagged source keeps its untagged tracks too
-     */
+    #[TestDox('A partly tagged source keeps its untagged tracks too')]
     public function testTaggedAndUntaggedTracksTravelTogether(): void
     {
         $info = $this->info(audioTracks: [
@@ -267,9 +266,7 @@ class ArgumentsHlsTest extends TestCase
         $this->assertStringContainsString('-hls_time 6', $argv);
     }
 
-    /**
-     * @testdox Keyframes further apart than a segment are rejected
-     */
+    #[TestDox('Keyframes further apart than a segment are rejected')]
     public function testKeyframesFurtherApartThanASegmentAreRejected(): void
     {
         $this->expectException(Unsupported::class);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Cue;
 use Utopia\Video\Exception\Input;
@@ -150,9 +151,8 @@ class SpritesheetTest extends TestCase
     /**
      * The interval is a divisor. Zero used to reach ffmpeg as a DivisionByZeroError
      * rather than as anything a caller could catch.
-     *
-     * @dataProvider brokenTiles
      */
+    #[DataProvider('brokenTiles')]
     public function testATileSettingThatCannotWorkIsRejected(callable $configure): void
     {
         $this->expectException(Input::class);
@@ -186,9 +186,7 @@ class SpritesheetTest extends TestCase
         $this->assertSame(2.0, (new Tile())->interval(null)->every(8.0));
     }
 
-    /**
-     * @dataProvider brokenThumbs
-     */
+    #[DataProvider('brokenThumbs')]
     public function testAThumbSettingThatCannotWorkIsRejected(callable $configure): void
     {
         $this->expectException(Input::class);

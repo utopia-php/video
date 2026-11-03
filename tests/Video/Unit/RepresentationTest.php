@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Representation;
 
 class RepresentationTest extends TestCase
 {
-    /**
-     * @testdox A representation names itself after its height
-     */
+    #[TestDox('A representation names itself after its height')]
     public function testDescribesItself(): void
     {
         $rep = new Representation(width: 1280, height: 720, video: 2538, audio: 128);
@@ -87,9 +86,8 @@ class RepresentationTest extends TestCase
     /**
      * The name becomes a filename while a ladder is being staged, so a name that
      * climbs out of the working directory would write wherever it pointed.
-     *
-     * @testdox A name that leaves the working directory is rejected
      */
+    #[TestDox('A name that leaves the working directory is rejected')]
     public function testRejectsANameThatEscapesTheWorkingDirectory(): void
     {
         foreach (['../../outside', 'sub/dir', '/absolute', '..'] as $name) {
