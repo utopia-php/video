@@ -24,9 +24,11 @@ use Utopia\Video\Variant;
 final class Mpd
 {
     /**
+     * @param  array<string, int>  $shipped  Bytes of segments already moved off
+     *                                       this disk, by name. See M3u8::read().
      * @return array{variants: list<Variant>, metadata: array<string, mixed>}
      */
-    public static function read(string $path, string $dir): array
+    public static function read(string $path, string $dir, array $shipped = []): array
     {
         $dir = \rtrim($dir, '/');
         $document = self::load($path);
@@ -63,6 +65,7 @@ final class Mpd
                     $dir,
                     $duration,
                     $target,
+                    $shipped,
                 );
             }
         }
@@ -70,6 +73,9 @@ final class Mpd
         return ['variants' => $variants, 'metadata' => $metadata];
     }
 
+    /**
+     * @param  array<string, int>  $shipped
+     */
     private static function variant(
         DOMElement $set,
         DOMElement $representation,
@@ -77,6 +83,7 @@ final class Mpd
         string $dir,
         float $duration,
         float $target,
+        array $shipped,
     ): Variant {
         $id = $representation->getAttribute('id');
         $id = $id !== '' ? $id : $group;
@@ -102,6 +109,7 @@ final class Mpd
             $dir,
             $duration,
             $bandwidth,
+            $shipped,
         );
 
         $media = \array_filter(
@@ -134,6 +142,7 @@ final class Mpd
     }
 
     /**
+     * @param  array<string, int>  $shipped
      * @return array{0: list<Segment>, 1: int, 2: int}
      */
     private static function segments(
@@ -143,6 +152,7 @@ final class Mpd
         string $dir,
         float $duration,
         int $bandwidth,
+        array $shipped,
     ): array {
         // A Representation describes its own segments when it says anything at
         // all, and only falls back to the AdaptationSet when it says nothing.
@@ -152,13 +162,13 @@ final class Mpd
             $list = self::child($element, 'SegmentList');
 
             if ($list !== null) {
-                return self::listed($list, $id, $dir);
+                return self::listed($list, $id, $dir, $shipped);
             }
 
             $template = self::child($element, 'SegmentTemplate');
 
             if ($template !== null) {
-                return self::templated($template, $id, $dir, $duration, $bandwidth);
+                return self::templated($template, $id, $dir, $duration, $bandwidth, $shipped);
             }
         }
 
@@ -168,9 +178,10 @@ final class Mpd
     /**
      * Every segment written out one by one.
      *
+     * @param  array<string, int>  $shipped
      * @return array{0: list<Segment>, 1: int, 2: int}
      */
-    private static function listed(DOMElement $list, string $id, string $dir): array
+    private static function listed(DOMElement $list, string $id, string $dir, array $shipped): array
     {
         $timescale = (int) $list->getAttribute('timescale');
         $start = (int) $list->getAttribute('startNumber');
@@ -185,13 +196,13 @@ final class Mpd
         $init = self::child($list, 'Initialization') ?? self::descendant($list, 'Initialization');
 
         if ($init !== null && $init->getAttribute('sourceURL') !== '') {
-            $segments[] = self::segment($id, $dir, $init->getAttribute('sourceURL'), 0.0, true, 0);
+            $segments[] = self::segment($id, $dir, $init->getAttribute('sourceURL'), 0.0, true, 0, $shipped);
         }
 
         $number = $start;
 
         foreach ($list->getElementsByTagName('SegmentURL') as $url) {
-            $segments[] = self::segment($id, $dir, $url->getAttribute('media'), $duration, false, $number);
+            $segments[] = self::segment($id, $dir, $url->getAttribute('media'), $duration, false, $number, $shipped);
             $number++;
         }
 
@@ -201,6 +212,7 @@ final class Mpd
     /**
      * Segment names described by formula, resolved into real filenames.
      *
+     * @param  array<string, int>  $shipped
      * @return array{0: list<Segment>, 1: int, 2: int}
      */
     private static function templated(
@@ -209,6 +221,7 @@ final class Mpd
         string $dir,
         float $duration,
         int $bandwidth,
+        array $shipped,
     ): array {
         $timescale = (int) $template->getAttribute('timescale');
         $timescale = $timescale > 0 ? $timescale : 1;
@@ -220,7 +233,7 @@ final class Mpd
         $init = $template->getAttribute('initialization');
 
         if ($init !== '') {
-            $segments[] = self::segment($id, $dir, self::expand($init, $id, 0, $bandwidth), 0.0, true, 0);
+            $segments[] = self::segment($id, $dir, self::expand($init, $id, 0, $bandwidth), 0.0, true, 0, $shipped);
         }
 
         $timeline = self::child($template, 'SegmentTimeline');
@@ -254,6 +267,7 @@ final class Mpd
                         $length,
                         false,
                         $number,
+                        $shipped,
                     );
                     $number++;
                     $time += $units;
@@ -281,6 +295,7 @@ final class Mpd
                 $length,
                 false,
                 $number,
+                $shipped,
             );
         }
 
@@ -322,6 +337,9 @@ final class Mpd
         return \str_replace('$$', '$', $name);
     }
 
+    /**
+     * @param  array<string, int>  $shipped
+     */
     private static function segment(
         string $variant,
         string $dir,
@@ -329,11 +347,13 @@ final class Mpd
         float $duration,
         bool $init,
         int $number,
+        array $shipped,
     ): Segment {
         $file = \basename($file);
         $path = $dir.'/'.$file;
+        $size = \is_file($path) ? (int) \filesize($path) : ($shipped[$file] ?? null);
 
-        if (! \is_file($path)) {
+        if ($size === null) {
             throw new Runtime('Segment "'.$file.'" is missing from the package');
         }
 
@@ -344,7 +364,7 @@ final class Mpd
             duration: $duration,
             init: $init,
             number: $number,
-            size: (int) \filesize($path),
+            size: $size,
         );
     }
 

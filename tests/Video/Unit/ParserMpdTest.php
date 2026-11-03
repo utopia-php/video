@@ -502,6 +502,60 @@ class ParserMpdTest extends TestCase
         Mpd::read($manifest, $this->dir);
     }
 
+    public function testShippedSegmentsAreDescribedFromTheirLedger(): void
+    {
+        $this->write('stream_chunk_0_00002.m4s', 'bb');
+        $manifest = $this->write('manifest.mpd', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4.0S">
+              <Period>
+                <AdaptationSet id="0" contentType="video">
+                  <Representation id="0" bandwidth="1">
+                    <SegmentTemplate timescale="1000" duration="2000" startNumber="1"
+                        initialization="stream_init_$RepresentationID$.m4s"
+                        media="stream_chunk_$RepresentationID$_$Number%05d$.m4s"/>
+                  </Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            XML);
+
+        $read = Mpd::read($manifest, $this->dir, [
+            'stream_init_0.m4s' => 800,
+            'stream_chunk_0_00001.m4s' => 4096,
+        ]);
+        $segments = $read['variants'][0]->segments;
+
+        $this->assertCount(3, $segments);
+        $this->assertTrue($segments[0]->init);
+        $this->assertSame(800, $segments[0]->size);
+        $this->assertSame(4096, $segments[1]->size);
+        $this->assertSame(2, $segments[2]->size);
+    }
+
+    public function testASegmentNeitherOnDiskNorShippedIsStillMissing(): void
+    {
+        $manifest = $this->write('manifest.mpd', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT6.0S">
+              <Period>
+                <AdaptationSet id="0" contentType="video">
+                  <Representation id="0" bandwidth="1">
+                    <SegmentList timescale="1000" duration="6000">
+                      <SegmentURL media="gone.m4s"/>
+                    </SegmentList>
+                  </Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            XML);
+
+        $this->expectException(Runtime::class);
+        $this->expectExceptionMessage('gone.m4s');
+
+        Mpd::read($manifest, $this->dir, ['other.m4s' => 10]);
+    }
+
     public function testUnreadableManifestIsAFailure(): void
     {
         $this->expectException(Runtime::class);
