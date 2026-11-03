@@ -119,7 +119,7 @@ abstract class Base extends TestCase
      * Packs the long source while a listener ships every finished segment and
      * deletes it, the way a worker with little scratch disk would.
      *
-     * @return array{package: Package, during: int, peak: int, shipped: array<string, int>}
+     * @return array{package: Package, during: int, peak: int, shipped: array<string, int>, progress: list<float>, after: int}
      *                                                                                      during: segments reported before ffmpeg said it was done;
      *                                                                                      peak: most segment files on disk at once
      */
@@ -129,6 +129,8 @@ abstract class Base extends TestCase
         $during = 0;
         $peak = 0;
         $shipped = [];
+        $progress = [];
+        $events = [];
         $dir = $this->dir;
 
         $package = (new Packager())
@@ -136,10 +138,13 @@ abstract class Base extends TestCase
             ->format((new X264())->crf(30)->keyframe(2.0)->params(['-preset', 'slow']))
             ->add(new Representation(1280, 720, 2500, 64))
             ->output($output->segment(2))
-            ->on(Packager::PROGRESS, function (Progress $progress) use (&$ended): void {
-                $ended = $ended || $progress->percent >= 100.0;
+            ->on(Packager::PROGRESS, function (Progress $report) use (&$ended, &$progress, &$events): void {
+                $ended = $ended || $report->percent >= 100.0;
+                $progress[] = $report->percent;
+                $events[] = $report->percent < 100.0 ? 'progress' : 'done';
             })
-            ->on(Packager::SEGMENT, function (Written $written) use (&$ended, &$during, &$peak, &$shipped, $dir): void {
+            ->on(Packager::SEGMENT, function (Written $written) use (&$ended, &$during, &$peak, &$shipped, &$events, $dir): void {
+                $events[] = 'segment';
                 $peak = \max($peak, \count(\glob($dir.'/*.{ts,m4s,mp4}', GLOB_BRACE) ?: []));
                 $during += $ended ? 0 : 1;
                 $shipped[$written->file] = $written->size;
@@ -147,13 +152,18 @@ abstract class Base extends TestCase
             })
             ->pack($this->dir);
 
-        return ['package' => $package, 'during' => $during, 'peak' => $peak, 'shipped' => $shipped];
+        // Progress reported once a segment had already left: shipping must not
+        // swallow or stall the progress stream a worker drives its status from.
+        $first = \array_search('segment', $events, true);
+        $after = $first === false ? 0 : \count(\array_keys(\array_slice($events, $first), 'progress', true));
+
+        return ['package' => $package, 'during' => $during, 'peak' => $peak, 'shipped' => $shipped, 'progress' => $progress, 'after' => $after];
     }
 
     /**
      * What ship() promises, for any output.
      *
-     * @param  array{package: Package, during: int, peak: int, shipped: array<string, int>}  $run
+     * @param  array{package: Package, during: int, peak: int, shipped: array<string, int>, progress: list<float>, after: int}  $run
      */
     protected function assertShippedWhileRunning(array $run): void
     {
@@ -164,6 +174,12 @@ abstract class Base extends TestCase
         $this->assertSame([], \glob($this->dir.'/*.{ts,m4s,mp4}', GLOB_BRACE) ?: []);
         $this->assertCount(\count($segments), $run['shipped']);
         $this->assertSame(\array_sum($run['shipped']), $run['package']->size());
+
+        $sorted = $run['progress'];
+        \sort($sorted);
+        $this->assertSame($sorted, $run['progress'], 'progress went backwards while segments shipped');
+        $this->assertSame(100.0, \end($run['progress']), 'progress never reached 100');
+        $this->assertGreaterThan(0, $run['after'], 'no progress was reported once segments began to ship');
     }
 
     protected static function silent(): string
