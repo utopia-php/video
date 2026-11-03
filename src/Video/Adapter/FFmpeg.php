@@ -23,10 +23,12 @@ use Utopia\Video\Parser\M3u8;
 use Utopia\Video\Parser\Mpd;
 use Utopia\Video\Progress;
 use Utopia\Video\Representation;
+use Utopia\Video\Source;
 use Utopia\Video\Spritesheet;
 use Utopia\Video\Thumb;
 use Utopia\Video\Tile;
 use Utopia\Video\Track;
+use Utopia\Video\Written;
 
 /**
  * Everything the ffmpeg binary can do, behind one class.
@@ -185,10 +187,21 @@ class FFmpeg extends Adapter implements Encoder, Packager
 
         $args[] = $builder->target();
 
-        try {
-            $this->execute($args, $info->duration);
+        // Only watched when someone is listening: without a listener every
+        // segment stays where ffmpeg wrote it, exactly as before.
+        $watcher = ($this->listeners[Observable::SEGMENT] ?? []) === []
+            ? null
+            : new Watcher($dir, function (Written $written): void {
+                $this->emit(Observable::SEGMENT, $written);
+            });
 
-            $package = $this->result($dir, $output, $info, $info->duration);
+        try {
+            $this->execute($args, $info->duration, $watcher);
+
+            // Only a run that succeeded has a last segment worth reporting.
+            $watcher?->scan(final: true);
+
+            $package = $this->result($dir, $output, $info, $info->duration, $watcher?->ledger() ?? []);
             $this->reportSuccess(self::NAME.': packed '.$dir);
 
             return $package;
@@ -209,7 +222,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $cover = $info->cover;
 
         if (! $info->hasVideo && $cover === null) {
-            throw new Input(self::NAME.': source "'.$path.'" carries no image to grab');
+            throw new Input(self::NAME.': source "'.Source::name($path).'" carries no image to grab');
         }
 
         $this->directory(\dirname($output));
@@ -277,7 +290,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         // Image subtitles (PGS, VobSub) are tracks too, but ffmpeg cannot turn
         // pictures into text; that failure surfaces from the run itself.
         if (! $found) {
-            throw new Input(self::NAME.': source "'.$path.'" has no subtitle stream '.$stream);
+            throw new Input(self::NAME.': source "'.Source::name($path).'" has no subtitle stream '.$stream);
         }
 
         $this->directory(\dirname($output));
@@ -306,11 +319,11 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $info = $this->prober()->read($path);
 
         if (! $info->hasVideo || ! $info->width || ! $info->height) {
-            throw new Input(self::NAME.': source "'.$path.'" carries no video to tile');
+            throw new Input(self::NAME.': source "'.Source::name($path).'" carries no video to tile');
         }
 
         if ($info->duration <= 0) {
-            throw new Input(self::NAME.': source "'.$path.'" has no measurable duration');
+            throw new Input(self::NAME.': source "'.Source::name($path).'" has no measurable duration');
         }
 
         $dir = $this->directory($dir);
@@ -376,9 +389,13 @@ class FFmpeg extends Adapter implements Encoder, Packager
     /**
      * Runs ffmpeg, translating its progress stream into events.
      *
+     * A watcher is scanned at the end of every progress block, which ffmpeg
+     * writes about twice a second, so finished segments are reported while the
+     * run continues. A listener that throws stops the run like any other.
+     *
      * @param  list<string>  $args
      */
-    protected function execute(array $args, float $duration): void
+    protected function execute(array $args, float $duration, ?Watcher $watcher = null): void
     {
         $frame = 0;
         $fps = 0.0;
@@ -386,7 +403,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
 
         $this->process(
             $args,
-            function (string $line) use (&$frame, &$fps, &$speed, $duration): void {
+            function (string $line) use (&$frame, &$fps, &$speed, $duration, $watcher): void {
                 $split = \strpos($line, '=');
 
                 if ($split === false) {
@@ -423,6 +440,8 @@ class FFmpeg extends Adapter implements Encoder, Packager
 
                         break;
                     case 'progress':
+                        $watcher?->scan();
+
                         if ($value === 'end') {
                             $this->emit(Observable::PROGRESS, new Progress(
                                 percent: 100.0,
@@ -552,8 +571,11 @@ class FFmpeg extends Adapter implements Encoder, Packager
 
     /**
      * Reads back what was written and describes it.
+     *
+     * @param  array<string, int>  $shipped  Segments reported while the run went on,
+     *                                       which a listener may have removed.
      */
-    private function result(string $dir, Output $output, Info $info, float $duration): Package
+    private function result(string $dir, Output $output, Info $info, float $duration, array $shipped = []): Package
     {
         $manifests = [];
 
@@ -564,7 +586,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
             self::independent($master);
             self::spoken($master, $info);
 
-            $read = Mpd::read($mpd, $dir);
+            $read = Mpd::read($mpd, $dir, $shipped);
             $manifests[] = new Manifest(Manifest::DASH, $mpd, true);
 
             if (\is_file($master)) {
@@ -576,7 +598,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
             }
         } elseif ($output instanceof Dash) {
             $mpd = $dir.'/'.$output->manifestFile();
-            $read = Mpd::read($mpd, $dir);
+            $read = Mpd::read($mpd, $dir, $shipped);
             $manifests[] = new Manifest(Manifest::DASH, $mpd, true);
         } elseif ($output instanceof Hls) {
             $master = $dir.'/'.$output->masterFile();
@@ -584,7 +606,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
             self::independent($master);
             self::spoken($master, $info);
 
-            $read = M3u8::read($master, $dir);
+            $read = M3u8::read($master, $dir, $shipped);
             $manifests[] = new Manifest(Manifest::HLS, $master, true);
 
             foreach ($read['playlists'] as $playlist) {

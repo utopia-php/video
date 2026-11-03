@@ -16,7 +16,16 @@ interface Observable
     public const LOG = 'log';
 
     /**
-     * Register a listener for PROGRESS or LOG.
+     * A segment the backend has finished writing, while the job is still
+     * running. Receives a Written.
+     *
+     * A listener may move or delete the file: its size is recorded before the
+     * event fires, and the package returned at the end still describes it.
+     */
+    public const SEGMENT = 'segment';
+
+    /**
+     * Register a listener for PROGRESS, LOG or SEGMENT.
      *
      * @param  callable  $listener
      */

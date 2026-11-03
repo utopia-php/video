@@ -168,6 +168,20 @@ consumer's job: the library reports every progress block it gets. How *much* arr
 adapter's display level (below), not a filter in the facade — the backend decides what to print, and
 everything it prints is forwarded.
 
+`SEGMENT` → `fn (Written $w)` fires during `pack()` for each segment the backend has finished
+(`file`, `path`, `size`), while the rest are still encoding. A segment counts as finished once a
+higher-numbered sibling exists in its sequence (HLS also writes `.tmp` until rename, via the default
+`temp_file` flag); the last of each sequence and every init segment are reported when the run ends.
+Manifests are never reported, and neither is anything that was in the directory, unchanged, before
+the run. A listener may upload and delete the file: the package still lists it, and the parsers
+describe it from the size recorded before the event (`M3u8::read()`/`Mpd::read()` take that ledger).
+Without a `SEGMENT` listener nothing is watched and nothing changes.
+
+Sources are a local file or an `http(s)://` URL (`Source::reachable()`), which ffmpeg and ffprobe
+read with range requests, so a source in object storage needs no local copy. Any other scheme, and a
+local name that starts like a protocol (`concat:`, `file:`), is refused: PHP's `is_file()` follows
+stream wrappers and ffmpeg reads such a prefix as a protocol, whatever is on disk.
+
 ### Adapter interfaces
 
 Two parent interfaces hold what every backend shares, so nothing is declared twice:

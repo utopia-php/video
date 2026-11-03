@@ -84,6 +84,22 @@ class MockTest extends Adapters
      * bug: it is what code gets proved against. FFmpeg raises Input for a source
      * with no picture in it, so this has to as well — it used to divide by zero.
      */
+    /**
+     * A presigned URL is a credential, and a refusal's message ends up in logs.
+     */
+    public function testARefusalNamesAUrlSourceWithoutItsSignature(): void
+    {
+        $mock = (new Mock())->pretend(width: 0, height: 0);
+
+        try {
+            (new Encoder($mock, $mock))->tile('https://bucket.example/v.mp4?X-Amz-Signature=secret', $this->dir);
+            $this->fail('a source with no video was tiled');
+        } catch (Input $e) {
+            $this->assertStringContainsString('https://bucket.example/v.mp4', $e->getMessage());
+            $this->assertStringNotContainsString('secret', $e->getMessage());
+        }
+    }
+
     public function testRefusesToTileASourceWithNoVideo(): void
     {
         $adapter = (new Mock())->pretend(duration: 8.0, width: 0, height: 0, audio: true);

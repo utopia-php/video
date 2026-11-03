@@ -97,6 +97,20 @@ $package->files();     // everything produced, ready to upload
 playlist tree, so either kind of player downloads the same bytes. Use `Hls` or `Dash` to write just
 one of them.
 
+To keep a long encode from holding its whole output on disk, listen for `Packager::SEGMENT`. It
+fires for each segment as soon as it is finished, while the rest are still encoding, and the
+listener may upload and delete the file; the package returned at the end still describes it:
+
+```php
+$packager->on(Packager::SEGMENT, function (Written $segment) use ($bucket): void {
+    $bucket->upload($segment->path, $segment->file);
+    unlink($segment->path);
+});
+```
+
+A source can also be an `http(s)://` URL, such as a presigned object storage link. ffmpeg reads it
+with range requests, so it is probed, packed and tiled without being copied to local disk first.
+
 A segment can only start where a keyframe already is, so packaging forces a keyframe every segment
 unless you ask for something else with `keyframe()`. Nothing has to be kept in step by hand, and a
 keyframe interval longer than a segment — which cannot produce segments of the length asked for — is

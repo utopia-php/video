@@ -277,4 +277,18 @@ class HlsTest extends Base
             $this->assertStringStartsWith('movie_', $segment->file);
         }
     }
+
+    /**
+     * A segment leaves the disk while ffmpeg is still encoding the rest, so a
+     * long encode never holds its whole output at once.
+     */
+    public function testSegmentsLeaveTheDiskWhileTheRestAreStillEncoding(): void
+    {
+        $this->assertShippedWhileRunning($this->ship(new Hls()));
+    }
+
+    public function testFragmentedSegmentsLeaveTheDiskWhileTheRestAreStillEncoding(): void
+    {
+        $this->assertShippedWhileRunning($this->ship((new Hls())->segments(Hls::FMP4)));
+    }
 }

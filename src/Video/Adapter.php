@@ -323,12 +323,14 @@ abstract class Adapter
     }
 
     /**
+     * A local file, or an http(s) URL the backend reads itself. See Source.
+     *
      * @throws Input
      */
     protected function source(string $path): string
     {
-        if (! \is_file($path)) {
-            throw new Input($this->getName().': source "'.$path.'" does not exist');
+        if (! Source::reachable($path)) {
+            throw new Input($this->getName().': source "'.Source::name($path).'" does not exist');
         }
 
         return $path;

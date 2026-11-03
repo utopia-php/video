@@ -118,8 +118,8 @@ class Encoder
      */
     public function open(string $path): static
     {
-        if (! \is_file($path)) {
-            throw new Exception\Input('Source "'.$path.'" does not exist');
+        if (! Source::reachable($path)) {
+            throw new Exception\Input('Source "'.Source::name($path).'" does not exist');
         }
 
         // Passed straight through: the adapter's own open() makes the same

@@ -14,11 +14,13 @@ use Utopia\Video\Output;
 use Utopia\Video\Package;
 use Utopia\Video\Progress;
 use Utopia\Video\Segment;
+use Utopia\Video\Source;
 use Utopia\Video\Spritesheet;
 use Utopia\Video\Thumb;
 use Utopia\Video\Tile;
 use Utopia\Video\Track;
 use Utopia\Video\Variant;
+use Utopia\Video\Written;
 
 /**
  * A backend that pretends, so tests do not need real tools.
@@ -89,7 +91,7 @@ class Mock extends Adapter implements Encoder, Packager, Probe
 
     public function valid(string $path): bool
     {
-        return \is_file($path) && $this->duration > 0;
+        return Source::reachable($path) && $this->duration > 0;
     }
 
     public function info(): ?Info
@@ -164,15 +166,21 @@ class Mock extends Adapter implements Encoder, Packager, Probe
 
             foreach ([0, 1] as $number) {
                 $file = $output->base().'_'.$rep->name.'_'.$number.'.ts';
-                \file_put_contents($dir.'/'.$file, 'mock segment');
+                $path = $dir.'/'.$file;
+                \file_put_contents($path, 'mock segment');
+                $size = (int) \filesize($path);
+
+                // Reported as each is finished, like the real backend, so a
+                // listener that ships and deletes segments can be proved here.
+                $this->emit(Observable::SEGMENT, new Written($file, $path, $size));
 
                 $segments[] = new Segment(
                     variant: (string) $position,
                     file: $file,
-                    path: $dir.'/'.$file,
+                    path: $path,
                     duration: $this->duration / 2,
                     number: $number,
-                    size: (int) \filesize($dir.'/'.$file),
+                    size: $size,
                 );
             }
 
@@ -210,7 +218,7 @@ class Mock extends Adapter implements Encoder, Packager, Probe
         $this->source($path);
 
         if ($this->width <= 0 || $this->height <= 0) {
-            throw new Input(self::NAME.': source "'.$path.'" carries no image to grab');
+            throw new Input(self::NAME.': source "'.Source::name($path).'" carries no image to grab');
         }
 
         $this->directory(\dirname($output));
@@ -237,7 +245,7 @@ class Mock extends Adapter implements Encoder, Packager, Probe
         }
 
         if (! $found) {
-            throw new Input(self::NAME.': source "'.$path.'" has no subtitle stream '.$stream);
+            throw new Input(self::NAME.': source "'.Source::name($path).'" has no subtitle stream '.$stream);
         }
 
         $this->directory(\dirname($output));
@@ -258,11 +266,11 @@ class Mock extends Adapter implements Encoder, Packager, Probe
         // The same refusals the real adapter makes, so code proved against this
         // double behaves the same way once ffmpeg is behind it.
         if ($this->width <= 0 || $this->height <= 0) {
-            throw new Input(self::NAME.': source "'.$path.'" carries no video to tile');
+            throw new Input(self::NAME.': source "'.Source::name($path).'" carries no video to tile');
         }
 
         if ($this->duration <= 0) {
-            throw new Input(self::NAME.': source "'.$path.'" has no measurable duration');
+            throw new Input(self::NAME.': source "'.Source::name($path).'" has no measurable duration');
         }
 
         $dir = $this->directory($dir);

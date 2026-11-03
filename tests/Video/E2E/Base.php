@@ -5,7 +5,14 @@ declare(strict_types=1);
 namespace Utopia\Tests\E2E;
 
 use PHPUnit\Framework\TestCase;
+use Utopia\Video\Format\X264;
+use Utopia\Video\Output;
+use Utopia\Video\Package;
+use Utopia\Video\Packager;
 use Utopia\Video\Process;
+use Utopia\Video\Progress;
+use Utopia\Video\Representation;
+use Utopia\Video\Written;
 
 /**
  * Shared fixtures for the tests that drive a real encoder.
@@ -81,6 +88,82 @@ abstract class Base extends TestCase
         ], timeout: 120);
 
         return $path;
+    }
+
+    /**
+     * Thirty seconds, long enough that ffmpeg reports progress several times
+     * before it finishes a 720p rung.
+     */
+    protected static function long(): string
+    {
+        $path = self::$root.'/long.mp4';
+
+        if (\is_file($path)) {
+            return $path;
+        }
+
+        Process::run([
+            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi', '-i', 'testsrc=duration=30:size=640x480:rate=25',
+            '-f', 'lavfi', '-i', 'sine=frequency=440:duration=30',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+            '-force_key_frames', 'expr:gte(t,n_forced*2)',
+            '-c:a', 'aac', '-shortest',
+            $path,
+        ], timeout: 120);
+
+        return $path;
+    }
+
+    /**
+     * Packs the long source while a listener ships every finished segment and
+     * deletes it, the way a worker with little scratch disk would.
+     *
+     * @return array{package: Package, during: int, peak: int, shipped: array<string, int>}
+     *                                                                                      during: segments reported before ffmpeg said it was done;
+     *                                                                                      peak: most segment files on disk at once
+     */
+    protected function ship(Output $output): array
+    {
+        $ended = false;
+        $during = 0;
+        $peak = 0;
+        $shipped = [];
+        $dir = $this->dir;
+
+        $package = (new Packager())
+            ->open(self::long())
+            ->format((new X264())->crf(30)->keyframe(2.0)->params(['-preset', 'slow']))
+            ->add(new Representation(1280, 720, 2500, 64))
+            ->output($output->segment(2))
+            ->on(Packager::PROGRESS, function (Progress $progress) use (&$ended): void {
+                $ended = $ended || $progress->percent >= 100.0;
+            })
+            ->on(Packager::SEGMENT, function (Written $written) use (&$ended, &$during, &$peak, &$shipped, $dir): void {
+                $peak = \max($peak, \count(\glob($dir.'/*.{ts,m4s,mp4}', GLOB_BRACE) ?: []));
+                $during += $ended ? 0 : 1;
+                $shipped[$written->file] = $written->size;
+                \unlink($written->path);
+            })
+            ->pack($this->dir);
+
+        return ['package' => $package, 'during' => $during, 'peak' => $peak, 'shipped' => $shipped];
+    }
+
+    /**
+     * What ship() promises, for any output.
+     *
+     * @param  array{package: Package, during: int, peak: int, shipped: array<string, int>}  $run
+     */
+    protected function assertShippedWhileRunning(array $run): void
+    {
+        $segments = $run['package']->segments();
+
+        $this->assertGreaterThan(0, $run['during'], 'nothing left the disk before ffmpeg finished');
+        $this->assertLessThan(\count($segments), $run['peak'], 'every segment was on disk at once');
+        $this->assertSame([], \glob($this->dir.'/*.{ts,m4s,mp4}', GLOB_BRACE) ?: []);
+        $this->assertCount(\count($segments), $run['shipped']);
+        $this->assertSame(\array_sum($run['shipped']), $run['package']->size());
     }
 
     protected static function silent(): string

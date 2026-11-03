@@ -123,7 +123,7 @@ class ArgumentsHlsTest extends TestCase
     {
         $argv = $this->build($this->info(), [new Representation(1280, 720, 2538)]);
 
-        $this->assertStringContainsString('-hls_flags independent_segments', $argv);
+        $this->assertStringContainsString('-hls_flags independent_segments+temp_file', $argv);
     }
 
     public function testVodPlaylistKeepsEverySegment(): void
