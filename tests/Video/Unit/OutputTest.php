@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Exception\Unsupported;
@@ -15,9 +16,7 @@ use Utopia\Video\Thumb;
 
 class OutputTest extends TestCase
 {
-    /**
-     * @testdox Every output shares the same defaults
-     */
+    #[TestDox('Every output shares the same defaults')]
     public function testSharedDefaults(): void
     {
         foreach ([new Hls(), new Dash(), new Cmaf()] as $output) {
@@ -28,9 +27,7 @@ class OutputTest extends TestCase
         }
     }
 
-    /**
-     * @testdox Each output reports which kind of stream it is
-     */
+    #[TestDox('Each output reports which kind of stream it is')]
     public function testTypes(): void
     {
         $this->assertSame(Output::HLS, (new Hls())->type());
@@ -48,9 +45,7 @@ class OutputTest extends TestCase
         $this->assertSame(['independent_segments', 'temp_file'], $hls->hlsFlags());
     }
 
-    /**
-     * @testdox HLS in fMP4 mode asks for an init segment
-     */
+    #[TestDox('HLS in fMP4 mode asks for an init segment')]
     public function testHlsFragmentedMp4(): void
     {
         $hls = (new Hls())->segments(Hls::FMP4);
@@ -154,9 +149,8 @@ class OutputTest extends TestCase
     /**
      * The base name is joined onto the output directory to build every filename,
      * so a name that walks back out of it is refused rather than followed.
-     *
-     * @testdox A base name that leaves the output directory is rejected
      */
+    #[TestDox('A base name that leaves the output directory is rejected')]
     public function testBaseNameCannotEscapeTheOutputDirectory(): void
     {
         foreach (['../escape', '/etc/passwd', 'sub/dir', '', 'with space', "null\0byte"] as $name) {

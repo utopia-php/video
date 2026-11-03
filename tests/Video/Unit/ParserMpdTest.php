@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Exception\Runtime;
 use Utopia\Video\Parser\Mpd;
@@ -37,9 +38,7 @@ class ParserMpdTest extends TestCase
         return $path;
     }
 
-    /**
-     * @testdox Reads ISO 8601 durations
-     */
+    #[TestDox('Reads ISO 8601 durations')]
     public function testReadsIsoDurations(): void
     {
         $this->assertSame(0.0, Mpd::seconds(''));
@@ -95,9 +94,7 @@ class ParserMpdTest extends TestCase
         );
     }
 
-    /**
-     * @testdox A literal dollar sign survives expansion
-     */
+    #[TestDox('A literal dollar sign survives expansion')]
     public function testLiteralDollarSignSurvives(): void
     {
         $this->assertSame('odd$name-3.m4s', Mpd::expand('odd$$name-$Number$.m4s', '0', 3, 800));

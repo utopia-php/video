@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Format\X264;
 use Utopia\Video\Output\Cmaf;
@@ -235,9 +236,7 @@ class ImmutabilityTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider setters
-     */
+    #[DataProvider('setters')]
     public function testASetterReturnsACopyAndLeavesItsReceiverAlone(
         callable $make,
         callable $set,

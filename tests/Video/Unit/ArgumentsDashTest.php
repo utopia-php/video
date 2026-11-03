@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Arguments\Cmaf as CmafArguments;
 use Utopia\Video\Arguments\Dash as Arguments;
@@ -203,9 +204,7 @@ class ArgumentsDashTest extends TestCase
         $this->assertStringContainsString('-window_size 0', $argv);
     }
 
-    /**
-     * @testdox The manifest is written where the output says
-     */
+    #[TestDox('The manifest is written where the output says')]
     public function testManifestPath(): void
     {
         $arguments = new Arguments(
@@ -219,9 +218,7 @@ class ArgumentsDashTest extends TestCase
         $this->assertSame('/out/video.mpd', $arguments->target());
     }
 
-    /**
-     * @testdox VP9 packages as DASH
-     */
+    #[TestDox('VP9 packages as DASH')]
     public function testVp9PackagesAsDash(): void
     {
         $argv = $this->build($this->info(), [new Representation(1280, 720, 2538)]);

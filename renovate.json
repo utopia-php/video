@@ -1,0 +1,41 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Versions built from source in the Dockerfile, marked with a renovate comment above their ARG.",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( extractVersion=(?<extractVersion>\\S+))?\\nARG \\w+=(?<currentValue>\\S+)"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "PHP_VERSION is the oldest supported PHP, not a version to chase. CI overrides it per matrix entry.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["php"],
+      "enabled": false
+    },
+    {
+      "description": "PHPUnit 12 needs PHP 8.3 and 13 needs 8.4. Lift this when the PHP floor moves.",
+      "matchPackageNames": ["phpunit/phpunit"],
+      "allowedVersions": "<12"
+    },
+    {
+      "description": "utopia-php/console 0.2.9 and later need PHP 8.5, so the 8.2 lock can never install them.",
+      "matchPackageNames": ["utopia-php/console"],
+      "allowedVersions": "<0.2.9"
+    },
+    {
+      "description": "Only tagged FFmpeg releases, not the -dev tags cut at the start of each cycle.",
+      "matchPackageNames": ["FFmpeg/FFmpeg"],
+      "allowedVersions": "/^\\d+\\.\\d+(\\.\\d+)?$/"
+    },
+    {
+      "description": "The IDE helper describes the extension the tests run against, so the two move together.",
+      "matchPackageNames": ["swoole/swoole-src", "swoole/ide-helper"],
+      "groupName": "swoole"
+    }
+  ]
+}

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Format\Copy;
 use Utopia\Video\Format\HEVC;
@@ -13,9 +14,7 @@ use Utopia\Video\Output;
 
 class FormatTest extends TestCase
 {
-    /**
-     * @testdox X264 defaults to h264 with AAC audio
-     */
+    #[TestDox('X264 defaults to h264 with AAC audio')]
     public function testX264Defaults(): void
     {
         $args = (new X264())->build();
@@ -25,9 +24,7 @@ class FormatTest extends TestCase
         $this->assertContains('-g', $args);
     }
 
-    /**
-     * @testdox The quality knobs reach the command
-     */
+    #[TestDox('The quality knobs reach the command')]
     public function testQualityKnobsAppear(): void
     {
         $args = (new X264())->crf(22)->bframes(3)->keyframe(2.0)->build();
@@ -84,9 +81,7 @@ class FormatTest extends TestCase
         $this->assertContains('-c:v', $args);
     }
 
-    /**
-     * @testdox HEVC is tagged hvc1 so Apple players accept it
-     */
+    #[TestDox('HEVC is tagged hvc1 so Apple players accept it')]
     public function testHevcTagsForApplePlayback(): void
     {
         $args = (new HEVC())->build();
@@ -95,9 +90,7 @@ class FormatTest extends TestCase
         $this->assertContains('hvc1', $args);
     }
 
-    /**
-     * @testdox VP9 can be packaged as DASH but not as HLS or CMAF
-     */
+    #[TestDox('VP9 can be packaged as DASH but not as HLS or CMAF')]
     public function testVp9PackagesAsDashOnly(): void
     {
         $format = new VP9();
@@ -107,9 +100,7 @@ class FormatTest extends TestCase
         $this->assertSame('libopus', $format->sound());
     }
 
-    /**
-     * @testdox X264 can be packaged as HLS, DASH and CMAF alike
-     */
+    #[TestDox('X264 can be packaged as HLS, DASH and CMAF alike')]
     public function testX264PackagesEverywhere(): void
     {
         $this->assertSame(

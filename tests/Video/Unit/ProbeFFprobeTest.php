@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Info;
 use Utopia\Video\Adapter\FFprobe;
@@ -259,9 +260,7 @@ class ProbeFFprobeTest extends TestCase
         $this->assertFalse($probe->valid('/nowhere/nothing.mp4'));
     }
 
-    /**
-     * @testdox The probe carries its name
-     */
+    #[TestDox('The probe carries its name')]
     public function testIsNamed(): void
     {
         $this->assertSame('ffprobe', (new FFprobe())->getName());

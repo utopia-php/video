@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\E2E;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Format\X264;
@@ -133,9 +134,8 @@ class SamplesTest extends TestCase
 
     /**
      * Whatever the container, the library should be able to say what it is.
-     *
-     * @dataProvider everySample
      */
+    #[DataProvider('everySample')]
     public function testReadsEverySample(string $name, string $path): void
     {
         if ($name === '') {
@@ -158,9 +158,8 @@ class SamplesTest extends TestCase
 
     /**
      * Extensions lie, so the codec is read from the file rather than the name.
-     *
-     * @dataProvider everySample
      */
+    #[DataProvider('everySample')]
     public function testCodecComesFromTheFileNotTheName(string $name, string $path): void
     {
         if ($name === '') {
@@ -206,9 +205,8 @@ class SamplesTest extends TestCase
     /**
      * Packaging normalises whatever came in, so a rung is always delivered at the
      * size and codec asked for.
-     *
-     * @dataProvider everyVideoSample
      */
+    #[DataProvider('everyVideoSample')]
     public function testPackagesEverySampleAsHls(string $name, string $path): void
     {
         if ($name === '') {
@@ -236,9 +234,8 @@ class SamplesTest extends TestCase
      * manifest rather than a playlist. Running it over the whole container matrix
      * is what proves the MPD describes what was actually written, whatever came
      * in.
-     *
-     * @dataProvider everyVideoSample
      */
+    #[DataProvider('everyVideoSample')]
     public function testPackagesEverySampleAsDash(string $name, string $path): void
     {
         if ($name === '') {
@@ -269,9 +266,7 @@ class SamplesTest extends TestCase
         $this->assertStringNotContainsString('<SegmentTemplate', $manifest, $name);
     }
 
-    /**
-     * @dataProvider everyVideoSample
-     */
+    #[DataProvider('everyVideoSample')]
     public function testGrabsAStillFromEverySample(string $name, string $path): void
     {
         if ($name === '') {
@@ -353,9 +348,8 @@ class SamplesTest extends TestCase
     /**
      * Multi-language audio has to survive into every output shape, not only the
      * one it was first made to work in.
-     *
-     * @dataProvider everyOutputShape
      */
+    #[DataProvider('everyOutputShape')]
     public function testEveryAudioLanguageSurvivesInto(string $shape): void
     {
         $path = Samples::all()['multi-audio.mkv'] ?? null;
@@ -402,9 +396,7 @@ class SamplesTest extends TestCase
         }
     }
 
-    /**
-     * @dataProvider everyOutputShape
-     */
+    #[DataProvider('everyOutputShape')]
     public function testTheManifestNamesEveryAudioLanguageIn(string $shape): void
     {
         $path = Samples::all()['multi-audio.mkv'] ?? null;
@@ -513,9 +505,8 @@ class SamplesTest extends TestCase
      * The case a real release actually looks like: two rungs and four dubs out
      * of one file, every dub selectable. Its two subtitle languages are the
      * application's business, so none of them appear here.
-     *
-     * @dataProvider everyOutputShape
      */
+    #[DataProvider('everyOutputShape')]
     public function testEveryDubSurvivesAlongsideTheLadderIn(string $shape): void
     {
         $path = Samples::all()['multi-track.mkv'] ?? null;
@@ -584,9 +575,7 @@ class SamplesTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider everyEncodeTarget
-     */
+    #[DataProvider('everyEncodeTarget')]
     public function testEncodeKeepsEveryDubIn(string $extension, bool $languages): void
     {
         $path = Samples::all()['multi-track.mkv'] ?? null;

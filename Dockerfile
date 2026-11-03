@@ -1,6 +1,8 @@
+# renovate: datasource=github-tags depName=FFmpeg/FFmpeg extractVersion=^n(?<version>.+)$
 ARG FFMPEG_VERSION=8.1.2
 ARG PHP_VERSION=8.2
-ARG SWOOLE_VERSION=v6.2.2
+# renovate: datasource=github-tags depName=swoole/swoole-src
+ARG SWOOLE_VERSION=v6.2.4
 
 FROM php:${PHP_VERSION}-cli-alpine AS ffmpeg
 
@@ -11,7 +13,10 @@ RUN apk add --no-cache \
     x264-dev x265-dev libvpx-dev opus-dev lame-dev zlib-dev \
     libtheora-dev libvorbis-dev
 
-RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" | tar -xJ -C /tmp \
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+        -o /tmp/ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+    && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp \
+    && rm /tmp/ffmpeg.tar.xz \
     && cd "/tmp/ffmpeg-${FFMPEG_VERSION}" \
     && ./configure \
         --prefix=/opt/ffmpeg \

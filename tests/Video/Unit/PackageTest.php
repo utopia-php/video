@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Manifest;
 use Utopia\Video\Package;
@@ -114,9 +115,7 @@ class PackageTest extends TestCase
         $this->assertCount(4, $package->files());
     }
 
-    /**
-     * @testdox An empty package reports nothing rather than failing
-     */
+    #[TestDox('An empty package reports nothing rather than failing')]
     public function testEmptyPackage(): void
     {
         $package = new Package();

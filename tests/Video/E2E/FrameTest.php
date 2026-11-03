@@ -15,7 +15,7 @@ class FrameTest extends Base
     /**
      * @return array{0: int, 1: int}
      */
-    private function size(string $path): array
+    private function dimensions(string $path): array
     {
         $size = \getimagesize($path);
 
@@ -30,7 +30,7 @@ class FrameTest extends Base
 
         $this->assertSame($this->dir.'/poster.jpg', $path);
         $this->assertWritten($path);
-        $this->assertSame([320, 240], $this->size($path));
+        $this->assertSame([320, 240], $this->dimensions($path));
     }
 
     public function testGrabsAFrameAtAGivenMoment(): void
@@ -52,7 +52,7 @@ class FrameTest extends Base
             (new Thumb())->width(160),
         );
 
-        [$width, $height] = $this->size($path);
+        [$width, $height] = $this->dimensions($path);
 
         $this->assertSame(160, $width);
         $this->assertSame(120, $height, 'height should follow the source aspect');
