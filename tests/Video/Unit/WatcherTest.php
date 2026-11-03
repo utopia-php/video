@@ -30,9 +30,10 @@ class WatcherTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (\glob($this->dir.'/{,.}*', GLOB_BRACE) ?: [] as $path) {
-            if (\is_file($path)) {
-                \unlink($path);
+        // scandir rather than glob: GLOB_BRACE does not exist on musl.
+        foreach (\scandir($this->dir) ?: [] as $name) {
+            if (\is_file($this->dir.'/'.$name)) {
+                \unlink($this->dir.'/'.$name);
             }
         }
 
@@ -198,8 +199,10 @@ class WatcherTest extends TestCase
 
         $this->assertSame([], $this->names(), 'the old second segment proves nothing about the new first');
 
+        // A real rewrite differs in size or second; see the Watcher's own note
+        // on what it cannot tell apart.
         \unlink($this->dir.'/stream_chunk_0_00002.m4s');
-        $this->write('stream_chunk_0_00002.m4s', 'new two');
+        $this->write('stream_chunk_0_00002.m4s', 'new second');
         $watcher->scan();
         $watcher->scan(final: true);
 

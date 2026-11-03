@@ -428,6 +428,13 @@ class FFmpeg extends Adapter implements Encoder, Packager
                         break;
                     case 'out_time_us':
                     case 'out_time_ms':
+                        // ffmpeg writes N/A for a block with no output timestamp
+                        // yet, which a float cast reads as 0: progress would fall
+                        // back to the start before climbing again.
+                        if (! \is_numeric($value) || (float) $value < 0) {
+                            break;
+                        }
+
                         // Both keys are reported in microseconds.
                         $time = ((float) $value) / 1000000;
                         $this->emit(Observable::PROGRESS, new Progress(

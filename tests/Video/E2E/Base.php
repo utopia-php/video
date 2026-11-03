@@ -145,7 +145,7 @@ abstract class Base extends TestCase
             })
             ->on(Packager::SEGMENT, function (Written $written) use (&$ended, &$during, &$peak, &$shipped, &$events, $dir): void {
                 $events[] = 'segment';
-                $peak = \max($peak, \count(\glob($dir.'/*.{ts,m4s,mp4}', GLOB_BRACE) ?: []));
+                $peak = \max($peak, \count(self::segments($dir)));
                 $during += $ended ? 0 : 1;
                 $shipped[$written->file] = $written->size;
                 \unlink($written->path);
@@ -171,7 +171,7 @@ abstract class Base extends TestCase
 
         $this->assertGreaterThan(0, $run['during'], 'nothing left the disk before ffmpeg finished');
         $this->assertLessThan(\count($segments), $run['peak'], 'every segment was on disk at once');
-        $this->assertSame([], \glob($this->dir.'/*.{ts,m4s,mp4}', GLOB_BRACE) ?: []);
+        $this->assertSame([], self::segments($this->dir));
         $this->assertCount(\count($segments), $run['shipped']);
         $this->assertSame(\array_sum($run['shipped']), $run['package']->size());
 
@@ -180,6 +180,20 @@ abstract class Base extends TestCase
         $this->assertSame($sorted, $run['progress'], 'progress went backwards while segments shipped');
         $this->assertSame(100.0, \end($run['progress']), 'progress never reached 100');
         $this->assertGreaterThan(0, $run['after'], 'no progress was reported once segments began to ship');
+    }
+
+    /**
+     * Segment files in a directory. Not glob with braces: GLOB_BRACE does not
+     * exist on musl, which is what the test image runs.
+     *
+     * @return list<string>
+     */
+    protected static function segments(string $dir): array
+    {
+        return \array_values(\array_filter(
+            \scandir($dir) ?: [],
+            static fn (string $name): bool => \preg_match('/\.(ts|m4s|mp4)$/', $name) === 1,
+        ));
     }
 
     protected static function silent(): string

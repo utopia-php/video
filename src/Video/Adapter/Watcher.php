@@ -25,6 +25,10 @@ use Utopia\Video\Written;
  * taken as proof that anything before it is finished: a source kept beside
  * the output must not be handed to a listener that deletes, and a longer
  * earlier run's segments must not release this run's before they are done.
+ * A file counts as rewritten when its inode, size or whole-second times
+ * change, so one rewritten in the same second at the same size on a reused
+ * inode looks untouched: it is not reported, but stays on disk and in the
+ * package. A fresh directory per run avoids the question entirely.
  *
  * @internal
  */
