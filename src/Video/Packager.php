@@ -40,6 +40,9 @@ class Packager
     /** Raw backend output, useful for debugging. Receives a string. */
     public const LOG = Observable::LOG;
 
+    /** A segment finished while the job runs. Receives a Written. See Observable::SEGMENT. */
+    public const SEGMENT = Observable::SEGMENT;
+
     protected readonly PackagerAdapter $adapter;
 
     /** Encodes the rungs when the packager cannot do it itself. */
@@ -122,8 +125,8 @@ class Packager
      */
     public function open(string $path): static
     {
-        if (! \is_file($path)) {
-            throw new Input('Source "'.$path.'" does not exist');
+        if (! Source::reachable($path)) {
+            throw new Input('Source "'.Source::name($path).'" does not exist');
         }
 
         $this->source = $path;

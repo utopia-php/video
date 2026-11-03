@@ -13,6 +13,7 @@ use Utopia\Video\Progress;
 use Utopia\Video\Representation;
 use Utopia\Video\Thumb;
 use Utopia\Video\Tile;
+use Utopia\Video\Written;
 
 /**
  * What every backend has to get right, tested through the facades.
@@ -177,6 +178,44 @@ abstract class Adapters extends TestCase
         foreach ($package->segments() as $segment) {
             $this->assertFileExists($segment->path);
         }
+    }
+
+    /**
+     * A listener that ships each segment and deletes it leaves nothing on disk,
+     * and the package still describes every segment, with the size it had.
+     */
+    public function testSegmentsCanBeShippedAndRemovedAsTheyAreFinished(): void
+    {
+        $shipped = [];
+
+        $package = $this->packager()
+            ->open($this->source())
+            ->format($this->format())
+            ->add(new Representation(320, 240, 400, 64))
+            ->output((new Hls())->segment(2))
+            ->on(Packager::SEGMENT, function (mixed $written) use (&$shipped): void {
+                $this->assertInstanceOf(Written::class, $written);
+                $this->assertArrayNotHasKey($written->file, $shipped, $written->file.' was reported twice');
+                $this->assertSame($written->size, (int) \filesize($written->path));
+                $shipped[$written->file] = $written->size;
+                \unlink($written->path);
+            })
+            ->pack($this->dir);
+
+        $this->assertNotEmpty($package->segments());
+
+        $described = [];
+
+        foreach ($package->segments() as $segment) {
+            $this->assertArrayHasKey($segment->file, $shipped, $segment->file.' was never reported');
+            $this->assertSame($shipped[$segment->file], $segment->size);
+            $this->assertGreaterThan(0, $segment->size);
+            $this->assertFileDoesNotExist($segment->path);
+            $described[$segment->file] = $segment->size;
+        }
+
+        $this->assertEqualsCanonicalizing(\array_keys($shipped), \array_keys($described), 'only segments are reported');
+        $this->assertSame(\array_sum($shipped), $package->size());
     }
 
     public function testRefusesToPackWithoutAnOutput(): void

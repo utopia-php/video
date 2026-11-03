@@ -181,9 +181,13 @@ final class M3u8
     /**
      * Reads a master playlist and everything it points at.
      *
+     * @param  array<string, int>  $shipped  Bytes of segments already moved off
+     *                                       this disk, by name. One of those is
+     *                                       not missing; it is described with
+     *                                       the size recorded before it went.
      * @return array{variants: list<Variant>, metadata: array<string, mixed>, playlists: list<string>}
      */
-    public static function read(string $master, string $dir): array
+    public static function read(string $master, string $dir, array $shipped = []): array
     {
         $dir = \rtrim($dir, '/');
         $variants = [];
@@ -207,7 +211,7 @@ final class M3u8
             $number = 0;
 
             foreach ($media['segments'] as $segment) {
-                $segments[] = self::segment($entry['id'], $dir, $segment, $number);
+                $segments[] = self::segment($entry['id'], $dir, $segment, $number, $shipped);
 
                 if (! $segment['init']) {
                     $number++;
@@ -237,12 +241,14 @@ final class M3u8
 
     /**
      * @param  array{file: string, duration: float, init: bool}  $segment
+     * @param  array<string, int>  $shipped
      */
-    private static function segment(string $variant, string $dir, array $segment, int $number): Segment
+    private static function segment(string $variant, string $dir, array $segment, int $number, array $shipped): Segment
     {
         $path = $dir.'/'.$segment['file'];
+        $size = \is_file($path) ? (int) \filesize($path) : ($shipped[$segment['file']] ?? null);
 
-        if (! \is_file($path)) {
+        if ($size === null) {
             throw new Runtime('Segment "'.$segment['file'].'" is missing from the package');
         }
 
@@ -253,7 +259,7 @@ final class M3u8
             duration: $segment['duration'],
             init: $segment['init'],
             number: $segment['init'] ? 0 : $number,
-            size: (int) \filesize($path),
+            size: $size,
         );
     }
 

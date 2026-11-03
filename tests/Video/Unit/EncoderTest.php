@@ -111,6 +111,23 @@ class EncoderTest extends TestCase
         $this->assertSame([], $adapter->reps);
     }
 
+    public function testAnHttpSourceCanBeOpened(): void
+    {
+        $adapter = new FakeEncoder();
+        $url = 'https://bucket.example/video.mp4?X-Amz-Signature=abc';
+
+        $this->encoder($adapter)->open($url);
+
+        $this->assertSame($url, $adapter->opened);
+    }
+
+    public function testASourceOnAnyOtherProtocolIsRefused(): void
+    {
+        $this->expectException(Input::class);
+
+        $this->encoder()->open('ftp://example.com/video.mp4');
+    }
+
     public function testOpeningAMissingSourceIsAFailure(): void
     {
         $this->expectException(Input::class);

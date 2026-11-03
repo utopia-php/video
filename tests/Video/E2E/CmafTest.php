@@ -195,4 +195,13 @@ class CmafTest extends Base
             ->output(new Cmaf())
             ->pack($this->dir);
     }
+
+    /**
+     * A segment leaves the disk while ffmpeg is still encoding the rest, so a
+     * long encode never holds its whole output at once.
+     */
+    public function testSegmentsLeaveTheDiskWhileTheRestAreStillEncoding(): void
+    {
+        $this->assertShippedWhileRunning($this->ship(new Cmaf()));
+    }
 }

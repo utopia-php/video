@@ -191,4 +191,13 @@ class DashTest extends Base
         $this->assertWritten($this->dir.'/manifest.mpd');
         $this->assertNotEmpty($package->segments());
     }
+
+    /**
+     * A segment leaves the disk while ffmpeg is still encoding the rest, so a
+     * long encode never holds its whole output at once.
+     */
+    public function testSegmentsLeaveTheDiskWhileTheRestAreStillEncoding(): void
+    {
+        $this->assertShippedWhileRunning($this->ship(new Dash()));
+    }
 }

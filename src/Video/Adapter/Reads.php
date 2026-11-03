@@ -6,6 +6,7 @@ namespace Utopia\Video\Adapter;
 
 use Utopia\Video\Exception\Input;
 use Utopia\Video\Exception\Runtime;
+use Utopia\Video\Source;
 
 /**
  * The shared answer to "can this file be used at all?".
@@ -20,7 +21,7 @@ trait Reads
 {
     public function valid(string $path): bool
     {
-        if (! \is_file($path)) {
+        if (! Source::reachable($path)) {
             return false;
         }
 

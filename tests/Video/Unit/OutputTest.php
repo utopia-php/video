@@ -45,7 +45,7 @@ class OutputTest extends TestCase
         $this->assertFalse($hls->fragmented());
         $this->assertSame('ts', $hls->extension());
         $this->assertSame('master.m3u8', $hls->masterFile());
-        $this->assertSame(['independent_segments'], $hls->hlsFlags());
+        $this->assertSame(['independent_segments', 'temp_file'], $hls->hlsFlags());
     }
 
     /**

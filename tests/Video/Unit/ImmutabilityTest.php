@@ -115,10 +115,10 @@ class ImmutabilityTest extends TestCase
             ],
             'Hls::flags' => [
                 fn () => new Hls(),
-                fn (Hls $it) => $it->flags(['temp_file']),
+                fn (Hls $it) => $it->flags(['delete_segments']),
                 fn (Hls $it) => $it->hlsFlags(),
-                ['independent_segments'],
-                ['temp_file'],
+                ['independent_segments', 'temp_file'],
+                ['delete_segments'],
             ],
             'Dash::template' => [
                 fn () => new Dash(),

@@ -171,6 +171,37 @@ class ParserM3u8Test extends TestCase
         M3u8::read($master, $this->dir);
     }
 
+    /**
+     * A segment shipped and deleted while the run was going is not missing:
+     * it is described with the size recorded before it left.
+     */
+    public function testAShippedSegmentIsDescribedFromItsLedger(): void
+    {
+        $this->write('v720_0001.ts', 'bb');
+        $this->write('v720.m3u8', "#EXTM3U\n#EXTINF:6.000000,\nv720_0000.ts\n#EXTINF:2.000000,\nv720_0001.ts\n");
+        $master = $this->write('master.m3u8', "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv720.m3u8\n");
+
+        $read = M3u8::read($master, $this->dir, ['v720_0000.ts' => 1234]);
+        $segments = $read['variants'][0]->segments;
+
+        $this->assertSame('v720_0000.ts', $segments[0]->file);
+        $this->assertSame($this->dir.'/v720_0000.ts', $segments[0]->path);
+        $this->assertSame(1234, $segments[0]->size);
+        $this->assertSame(6.0, $segments[0]->duration);
+        $this->assertSame(2, $segments[1]->size, 'a file still on disk is measured, not looked up');
+    }
+
+    public function testASegmentNeitherOnDiskNorShippedIsStillMissing(): void
+    {
+        $this->write('v720.m3u8', "#EXTM3U\n#EXTINF:6.000000,\nmissing.ts\n");
+        $master = $this->write('master.m3u8', "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv720.m3u8\n");
+
+        $this->expectException(Runtime::class);
+        $this->expectExceptionMessage('missing.ts');
+
+        M3u8::read($master, $this->dir, ['other.ts' => 10]);
+    }
+
     public function testMissingPlaylistIsAFailure(): void
     {
         $master = $this->write('master.m3u8', "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\ngone.m3u8\n");

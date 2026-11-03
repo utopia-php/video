@@ -32,8 +32,14 @@ final class Hls extends Output
 
     private string $url = '';
 
-    /** @var list<string> */
-    private array $flags = ['independent_segments'];
+    /**
+     * temp_file has ffmpeg write each segment as `.tmp` and rename it once
+     * closed, so a finished name is never a half-written file. That is what
+     * lets a SEGMENT listener ship segments while the run is still going.
+     *
+     * @var list<string>
+     */
+    private array $flags = ['independent_segments', 'temp_file'];
 
     public function type(): string
     {

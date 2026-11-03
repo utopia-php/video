@@ -310,6 +310,28 @@ class PackagerTest extends TestCase
         $this->packager()->open($this->file)->output(new Cmaf())->pack('/out');
     }
 
+    public function testAnHttpSourceIsHandedToTheAdapterAsItIs(): void
+    {
+        $adapter = new FusedPackager();
+        $url = 'https://bucket.example/video.mp4?X-Amz-Signature=abc';
+
+        $this->packager($adapter)
+            ->open($url)
+            ->format(new X264())
+            ->add(new Representation(320, 240, 400))
+            ->output(new Cmaf())
+            ->pack($this->dir.'/out');
+
+        $this->assertSame([$url], $adapter->opened);
+    }
+
+    public function testASourceOnAnyOtherProtocolIsRefused(): void
+    {
+        $this->expectException(Input::class);
+
+        $this->packager()->open('file:///etc/passwd');
+    }
+
     public function testOpeningAMissingSourceIsAFailure(): void
     {
         $this->expectException(Input::class);
