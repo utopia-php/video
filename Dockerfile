@@ -9,15 +9,14 @@ FROM php:${PHP_VERSION}-cli-alpine AS ffmpeg
 ARG FFMPEG_VERSION
 
 RUN apk add --no-cache \
-    build-base nasm pkgconf curl xz \
+    build-base nasm pkgconf git \
     x264-dev x265-dev libvpx-dev opus-dev lame-dev zlib-dev \
     libtheora-dev libvorbis-dev
 
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-        -o /tmp/ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
-    && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp \
-    && rm /tmp/ffmpeg.tar.xz \
-    && cd "/tmp/ffmpeg-${FFMPEG_VERSION}" \
+# Cloned from the GitHub mirror at the release tag, like swoole below. ffmpeg.org
+# resets or times out connections from CI runners, and retries do not outlast it.
+RUN git clone --depth 1 --branch "n${FFMPEG_VERSION}" https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg \
+    && cd /tmp/ffmpeg \
     && ./configure \
         --prefix=/opt/ffmpeg \
         --enable-gpl \
@@ -34,7 +33,7 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
     && make -j"$(nproc)" \
     && make install \
     && /opt/ffmpeg/bin/ffmpeg -version \
-    && rm -rf "/tmp/ffmpeg-${FFMPEG_VERSION}"
+    && rm -rf /tmp/ffmpeg
 
 # Built from source, pinned, in its own stage so it compiles alongside ffmpeg
 # rather than after it. Only the tests need it: the library itself has no swoole
