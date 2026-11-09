@@ -1,5 +1,5 @@
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg extractVersion=^n(?<version>.+)$
-ARG FFMPEG_VERSION=8.1.2
+ARG FFMPEG_VERSION=8.1.3
 ARG PHP_VERSION=8.2
 # renovate: datasource=github-tags depName=swoole/swoole-src
 ARG SWOOLE_VERSION=v6.2.4
