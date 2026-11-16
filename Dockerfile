@@ -55,7 +55,7 @@ RUN apk add --no-cache \
     && cp "$(php-config --extension-dir)/swoole.so" /ext/swoole.so \
     && rm -rf /tmp/swoole
 
-FROM composer:2 AS vendor
+FROM composer:2@sha256:0c8e663f14c94d07b3c45b175c51f5a14718508f21fe4dd7e54f09488dd0ed71 AS vendor
 
 ARG TESTING=false
 
