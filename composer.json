@@ -37,7 +37,7 @@
         "phpunit/phpunit": "11.*",
         "phpstan/phpstan": "^2.0",
         "laravel/pint": "1.*",
-        "swoole/ide-helper": "6.2.4"
+        "swoole/ide-helper": "6.2.5"
     },
     "suggest": {
         "ext-swoole": "Needed to run the library inside Swoole coroutines."

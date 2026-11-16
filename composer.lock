@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9498c29b9243bb6588042a082d723485",
+    "content-hash": "7ee3c3a35f5a0fd1c0f39a71a8c3d624",
     "packages": [
         {
             "name": "utopia-php/console",
@@ -1970,16 +1970,16 @@
         },
         {
             "name": "swoole/ide-helper",
-            "version": "6.2.4",
+            "version": "6.2.5",
             "source": {
                 "type": "git",
                 "url": "https://github.com/swoole/ide-helper.git",
-                "reference": "7dc4e1d9f532ddab5a78643eb8f0b7990293793b"
+                "reference": "7babe0825e72d1b4705fd137621f5eb755e07f12"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/swoole/ide-helper/zipball/7dc4e1d9f532ddab5a78643eb8f0b7990293793b",
-                "reference": "7dc4e1d9f532ddab5a78643eb8f0b7990293793b",
+                "url": "https://api.github.com/repos/swoole/ide-helper/zipball/7babe0825e72d1b4705fd137621f5eb755e07f12",
+                "reference": "7babe0825e72d1b4705fd137621f5eb755e07f12",
                 "shasum": ""
             },
             "type": "library",
@@ -1996,10 +1996,10 @@
             "description": "IDE help files for Swoole.",
             "support": {
                 "issues": "https://github.com/swoole/ide-helper/issues",
-                "source": "https://github.com/swoole/ide-helper/tree/6.2.4"
+                "source": "https://github.com/swoole/ide-helper/tree/6.2.5"
             },
-            "time": "2026-10-26T02:02:40+00:00",
-            "published-time": "2026-10-26T02:06:57+00:00"
+            "time": "2026-11-07T03:27:41+00:00",
+            "published-time": "2026-11-07T03:31:14+00:00"
         },
         {
             "name": "theseer/tokenizer",
