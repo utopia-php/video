@@ -2,7 +2,7 @@
 ARG FFMPEG_VERSION=8.1.2
 ARG PHP_VERSION=8.2
 # renovate: datasource=github-tags depName=swoole/swoole-src
-ARG SWOOLE_VERSION=v6.2.4
+ARG SWOOLE_VERSION=v6.2.5
 
 FROM php:${PHP_VERSION}-cli-alpine AS ffmpeg
 
