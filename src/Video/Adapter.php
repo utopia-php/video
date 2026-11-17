@@ -105,6 +105,12 @@ abstract class Adapter
 
     protected readonly string $level;
 
+    /** @var list<string> Protocols an input may be opened with; empty allows any. */
+    protected readonly array $protocols;
+
+    /** @var list<string> Demuxers an input may be read with; empty allows any. */
+    protected readonly array $formats;
+
     /**
      * Who reads media details for this adapter.
      *
@@ -131,19 +137,74 @@ abstract class Adapter
 
     /**
      * @param  string|null  $level  One of the constants above; null keeps the default.
+     * @param  list<string>  $protocols  Protocols inputs may be opened with, nested
+     *                                   opens included (`file`, or `https,tls,tcp`
+     *                                   for a URL); empty allows any.
+     * @param  list<string>  $formats  Demuxers inputs may be read with (`mov`,
+     *                                 `matroska`, ...); empty allows any. Leaving
+     *                                 out playlist formats such as `hls` and
+     *                                 `concat` stops a source from opening others.
      *
      * @throws Unsupported
+     * @throws Input
      */
     public function __construct(
         ?string $binary = null,
         ?int $timeout = null,
         int $threads = 0,
         ?string $level = null,
+        array $protocols = [],
+        array $formats = [],
     ) {
         $this->binary = $binary ?? static::BINARY;
         $this->timeout = $timeout ?? static::TIMEOUT;
         $this->threads = $threads;
         $this->level = $level === null ? static::LEVEL : self::graded($level);
+        $this->protocols = self::names($protocols);
+        $this->formats = self::names($formats);
+    }
+
+    /**
+     * Options that restrict how the next input is opened, placed before it.
+     *
+     * @return list<string>
+     */
+    protected function opens(): array
+    {
+        $args = [];
+
+        if ($this->protocols !== []) {
+            $args[] = '-protocol_whitelist';
+            $args[] = \implode(',', $this->protocols);
+        }
+
+        if ($this->formats !== []) {
+            $args[] = '-format_whitelist';
+            $args[] = \implode(',', $this->formats);
+        }
+
+        return $args;
+    }
+
+    /**
+     * @param  array<mixed>  $names
+     * @return list<string>
+     *
+     * @throws Input
+     */
+    private static function names(array $names): array
+    {
+        $list = [];
+
+        foreach ($names as $name) {
+            // Joined with commas into one argument, so a name must not carry one.
+            if (! \is_string($name) || \preg_match('/^[a-z0-9_]+$/', $name) !== 1) {
+                throw new Input('Invalid protocol or format name: '.\var_export($name, true));
+            }
+            $list[] = $name;
+        }
+
+        return \array_values(\array_unique($list));
     }
 
     public function getName(): string
