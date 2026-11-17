@@ -98,6 +98,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $video = $info->hasVideo && ($rep === null || $rep->scaled());
 
         $args = $this->prefix();
+        \array_push($args, ...$this->opens());
         $args[] = '-i';
         $args[] = $source;
 
@@ -177,6 +178,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $args = $this->prefix();
 
         foreach ($this->paths() as $input) {
+            \array_push($args, ...$this->opens());
             $args[] = '-i';
             $args[] = $input;
         }
@@ -236,6 +238,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
             $args[] = self::number($at);
         }
 
+        \array_push($args, ...$this->opens());
         $args[] = '-i';
         $args[] = $path;
         $args[] = '-map';
@@ -296,6 +299,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $this->directory(\dirname($output));
 
         $args = $this->prefix(progress: false);
+        \array_push($args, ...$this->opens());
         $args[] = '-i';
         $args[] = $path;
         $args[] = '-map';
@@ -334,6 +338,7 @@ class FFmpeg extends Adapter implements Encoder, Packager
         $height += $height % 2;
 
         $args = $this->prefix(progress: false);
+        \array_push($args, ...$this->opens());
         $args[] = '-i';
         $args[] = $path;
         $args[] = '-fps_mode';

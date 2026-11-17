@@ -43,6 +43,7 @@ class FFprobe extends Adapter implements Probe
             '-show_format',
             '-show_streams',
             '-show_chapters',
+            ...$this->opens(),
             $this->source($path),
         ]);
 

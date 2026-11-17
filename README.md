@@ -205,6 +205,23 @@ adapter you built yourself cannot quietly keep one of its own:
 $encoder = new Encoder(probe: new MyProbe());
 ```
 
+### Untrusted sources
+
+ffmpeg follows references inside some inputs: an HLS playlist or a concat list opens the files and
+URLs it names. When sources come from users, limit the demuxers and protocols every input may use.
+Both lists go before each input on the ffmpeg and ffprobe command lines; nested opens inherit them.
+
+```php
+$formats = ['mov', 'matroska', 'avi', 'mpegts', 'ogg', 'wav', 'mp3', 'aac', 'flac'];
+
+$encoder = new Encoder(
+    new FFmpeg(protocols: ['file'], formats: $formats),
+    new FFprobe(protocols: ['file'], formats: $formats),
+);
+```
+
+Use `['https', 'tls', 'tcp']` as the protocols for a source read from a URL.
+
 ### How much a backend says
 
 Every adapter has a display level, defaulting to `Adapter::ERROR` — only what went wrong, because
