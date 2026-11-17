@@ -58,6 +58,33 @@ class WhitelistTest extends Base
         $encoder->grab($this->playlist(), $this->dir.'/poster.jpg');
     }
 
+    public function testAProbeLimitedToOtherProtocolsRefusesALocalFile(): void
+    {
+        $probe = new FFprobe(protocols: ['https', 'tls', 'tcp']);
+
+        $this->expectException(Runtime::class);
+        $probe->read(self::video());
+    }
+
+    public function testAnEncoderLimitedToOtherProtocolsRefusesALocalFile(): void
+    {
+        $encoder = new Encoder(new FFmpeg(protocols: ['https', 'tls', 'tcp']), new FFprobe());
+
+        $this->expectException(Runtime::class);
+        $encoder->grab(self::video(), $this->dir.'/poster.jpg');
+    }
+
+    public function testARestrictedEncoderStillEncodesAPlainContainer(): void
+    {
+        // The encode path builds its own command line; it must still run.
+        $encoder = new Encoder(
+            new FFmpeg(protocols: self::PROTOCOLS, formats: self::FORMATS),
+            new FFprobe(protocols: self::PROTOCOLS, formats: self::FORMATS),
+        );
+
+        $this->assertWritten($encoder->open(self::video())->encode($this->dir.'/out.mp4'));
+    }
+
     public function testARestrictedEncoderStillReadsAPlainContainer(): void
     {
         $encoder = new Encoder(
