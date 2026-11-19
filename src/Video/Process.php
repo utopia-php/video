@@ -38,6 +38,14 @@ final class Process
     private const OUTPUT = 8388608;
 
     /**
+     * The flag whose value is request headers, which may carry a credential.
+     * A failure reports the command that failed, so that value is left out of it.
+     */
+    public const HEADERS = '-headers';
+
+    private const MASK = '***';
+
+    /**
      * @param  list<string>  $command
      * @param  callable(string):void|null  $stdout  Called once per line written to stdout.
      * @param  callable(string):void|null  $stderr  Called once per line written to stderr.
@@ -69,7 +77,7 @@ final class Process
         $process = @\proc_open($command, $descriptors, $pipes);
 
         if (! \is_resource($process)) {
-            throw new Runtime('Unable to start "'.$command[0].'"', $command);
+            throw new Runtime('Unable to start "'.$command[0].'"', self::masked($command));
         }
 
         \fclose($pipes[0]);
@@ -183,7 +191,7 @@ final class Process
             if ($status !== 0) {
                 throw new Runtime(
                     'Command "'.$command[0].'" failed with exit code '.$status,
-                    $command,
+                    self::masked($command),
                     \trim($errors),
                     $status,
                 );
@@ -318,7 +326,24 @@ final class Process
 
         \proc_close($process);
 
-        return new Runtime($message, $command, \trim($errors), self::ended($status));
+        return new Runtime($message, self::masked($command), \trim($errors), self::ended($status));
+    }
+
+    /**
+     * The command as a failure may report it: without its request headers.
+     *
+     * @param  list<string>  $command
+     * @return list<string>
+     */
+    private static function masked(array $command): array
+    {
+        foreach ($command as $index => $argument) {
+            if ($argument === self::HEADERS && isset($command[$index + 1])) {
+                $command[$index + 1] = self::MASK;
+            }
+        }
+
+        return $command;
     }
 
     /**

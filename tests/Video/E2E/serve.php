@@ -9,6 +9,9 @@ declare(strict_types=1);
  * whose index sits at the end cannot be read without seeking, so this honours
  * single byte ranges with a 206. Every ranged answer is appended to the log
  * named by UTOPIA_SERVE_LOG, which is how a test proves seeking happened.
+ *
+ * A URL carrying `guard=<value>` is only served to a request whose X-Guard
+ * header says the same, standing in for a source that wants a credential.
  */
 $root = (string) \getenv('UTOPIA_SERVE_ROOT');
 $log = (string) \getenv('UTOPIA_SERVE_LOG');
@@ -18,6 +21,16 @@ $path = $root.'/'.$name;
 
 if ($name === '' || ! \is_file($path)) {
     \http_response_code(404);
+
+    return true;
+}
+
+$query = [];
+\parse_str((string) \parse_url(\is_string($uri) ? $uri : '', PHP_URL_QUERY), $query);
+$guard = $query['guard'] ?? null;
+
+if (\is_string($guard) && ($_SERVER['HTTP_X_GUARD'] ?? '') !== $guard) {
+    \http_response_code(401);
 
     return true;
 }
