@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\E2E;
 
+use Utopia\Video\Adapter\FFmpeg;
+use Utopia\Video\Adapter\FFprobe;
 use Utopia\Video\Encoder;
+use Utopia\Video\Exception\Runtime;
 use Utopia\Video\Format\X264;
 use Utopia\Video\Output\Hls;
 use Utopia\Video\Packager;
@@ -169,5 +172,65 @@ class RemoteTest extends Base
             ->encode($this->dir.'/out.mp4');
 
         $this->assertWritten($path);
+    }
+
+    /**
+     * Left alone, ffmpeg asks for everything from an offset to the end of the
+     * file. A source that answers in pieces of its own choosing needs to be
+     * asked for pieces, and the request size is what does that.
+     */
+    public function testAUrlIsReadInRequestsOfTheGivenSize(): void
+    {
+        $options = ['request_size' => 65536, 'multiple_requests' => 1];
+        $encoder = new Encoder(new FFmpeg(options: $options), new FFprobe(options: $options));
+
+        $path = $encoder
+            ->open($this->url())
+            ->format((new X264())->crf(30)->params(['-preset', 'ultrafast']))
+            ->encode($this->dir.'/out.mp4');
+
+        $this->assertWritten($path);
+        $this->assertNotEmpty($this->ranges(), 'ffmpeg never asked for a byte range');
+
+        foreach ($this->ranges() as $range) {
+            [$start, $end] = \array_map(\intval(...), \explode('-', $range));
+            $this->assertLessThanOrEqual(65536, $end - $start + 1, 'range '.$range.' is larger than the request size');
+        }
+    }
+
+    public function testAUrlIsRequestedWithTheGivenHeaders(): void
+    {
+        $url = self::$url.'/source.mp4?guard=letmein';
+
+        $this->assertFalse((new Packager())->valid($url), 'the guarded source was served without its header');
+
+        $headers = ['X-Guard' => 'letmein'];
+        $encoder = new Encoder(new FFmpeg(headers: $headers), new FFprobe(headers: $headers));
+
+        $this->assertEqualsWithDelta(8.0, $encoder->probe($url)->duration, 0.2);
+
+        $sheet = $encoder->tile($url, $this->dir, new Tile());
+        $this->assertNotEmpty($sheet->images());
+    }
+
+    /**
+     * A failure carries the command that failed, and a header is where a
+     * credential goes when the URL cannot hold it.
+     */
+    public function testAFailedCommandDoesNotReportItsHeaders(): void
+    {
+        $probe = new FFprobe(headers: ['X-Guard' => 'a-secret-value']);
+
+        try {
+            $probe->read(self::$url.'/nothing.mp4');
+            $this->fail('a source that answers not found was read');
+        } catch (Runtime $error) {
+            $command = \implode(' ', $error->command());
+
+            $this->assertStringContainsString('-headers ***', $command);
+            $this->assertStringNotContainsString('a-secret-value', $command);
+            $this->assertStringNotContainsString('a-secret-value', $error->getMessage());
+            $this->assertStringNotContainsString('a-secret-value', $error->output());
+        }
     }
 }

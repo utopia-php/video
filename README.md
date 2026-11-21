@@ -222,6 +222,26 @@ $encoder = new Encoder(
 
 Use `['https', 'tls', 'tcp']` as the protocols for a source read from a URL.
 
+### Sources read from a URL
+
+ffmpeg asks an HTTP source for everything from an offset to the end of the file. A source that
+answers in pieces of its own choosing, or that wants a credential the URL cannot carry, is told so
+with protocol options and headers. Both go before each URL input on the ffmpeg and ffprobe command
+lines; a local file is opened without them.
+
+```php
+$options = ['request_size' => 16 * 1024 * 1024, 'multiple_requests' => 1];
+$headers = ['X-Api-Key' => $key];
+
+$encoder = new Encoder(
+    new FFmpeg(options: $options, headers: $headers),
+    new FFprobe(options: $options, headers: $headers),
+);
+```
+
+Options are named as ffmpeg names them. Headers are treated as a secret: the command a failure
+reports carries `***` in their place.
+
 ### How much a backend says
 
 Every adapter has a display level, defaulting to `Adapter::ERROR` — only what went wrong, because

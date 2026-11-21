@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Utopia\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Utopia\Video\Adapter;
 use Utopia\Video\Adapter\Encoder as EncoderAdapter;
@@ -346,6 +347,86 @@ class AdapterTest extends TestCase
             ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'verbose'],
             \array_slice($adapter->command(), 0, 5),
         );
+    }
+
+    /**
+     * Protocol options and headers belong to a URL. A local file has no such
+     * options, and ffmpeg refuses a command that names one.
+     */
+    public function testInputOptionsAndHeadersReachOnlyAUrl(): void
+    {
+        $adapter = new class (options: ['request_size' => 1024, 'multiple_requests' => 1], headers: ['X-Key' => 'secret', 'X-Other' => 'value']) extends FFmpeg {
+            /** @return list<string> */
+            public function before(string $path): array
+            {
+                return $this->opens($path);
+            }
+        };
+
+        $this->assertSame(
+            ['-request_size', '1024', '-multiple_requests', '1', '-headers', "X-Key: secret\r\nX-Other: value\r\n"],
+            $adapter->before('https://example.com/source.mp4?signature=abc'),
+        );
+        $this->assertSame([], $adapter->before('/tmp/source.mp4'));
+    }
+
+    public function testInputOptionsFollowTheWhitelists(): void
+    {
+        $adapter = new class (protocols: ['https', 'tls', 'tcp'], options: ['request_size' => 1024]) extends FFprobe {
+            /** @return list<string> */
+            public function before(string $path): array
+            {
+                return $this->opens($path);
+            }
+        };
+
+        $this->assertSame(
+            ['-protocol_whitelist', 'https,tls,tcp', '-request_size', '1024'],
+            $adapter->before('https://example.com/source.mp4'),
+        );
+        $this->assertSame(['-protocol_whitelist', 'https,tls,tcp'], $adapter->before('/tmp/source.mp4'));
+    }
+
+    /**
+     * @param  array<mixed>  $options
+     * @param  array<mixed>  $headers
+     */
+    #[DataProvider('unusable')]
+    public function testAnUnusableInputOptionOrHeaderIsRejected(array $options, array $headers): void
+    {
+        $this->expectException(Input::class);
+
+        // @phpstan-ignore argument.type, argument.type (the point is that these are the wrong shape)
+        new FFmpeg(options: $options, headers: $headers);
+    }
+
+    /**
+     * @return array<string, array{array<mixed>, array<mixed>}>
+     */
+    public static function unusable(): array
+    {
+        return [
+            'an option that is a flag of its own' => [['-y' => 1], []],
+            'an option without a name' => [[1024], []],
+            'an option value with a space' => [['request_size' => '1 -i /etc/passwd'], []],
+            'a header name with a colon' => [[], ['X-Key: other' => 'value']],
+            'a header value with a line break' => [[], ['X-Key' => "value\r\nX-Other: injected"]],
+            'an empty header value' => [[], ['X-Key' => '']],
+        ];
+    }
+
+    /**
+     * The message says which header was refused, never what it held.
+     */
+    public function testARejectedHeaderIsNotEchoed(): void
+    {
+        try {
+            new FFmpeg(headers: ['X-Key' => "a-secret\nvalue"]);
+            $this->fail('a header value with a line break was accepted');
+        } catch (Input $error) {
+            $this->assertStringContainsString('X-Key', $error->getMessage());
+            $this->assertStringNotContainsString('a-secret', $error->getMessage());
+        }
     }
 
     /**

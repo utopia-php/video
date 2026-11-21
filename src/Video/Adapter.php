@@ -111,6 +111,12 @@ abstract class Adapter
     /** @var list<string> Demuxers an input may be read with; empty allows any. */
     protected readonly array $formats;
 
+    /** @var array<string, string> Protocol options a URL input is opened with. */
+    protected readonly array $options;
+
+    /** @var array<string, string> Headers a URL input is requested with; treated as a secret. */
+    protected readonly array $headers;
+
     /**
      * Who reads media details for this adapter.
      *
@@ -144,6 +150,17 @@ abstract class Adapter
      *                                 `matroska`, ...); empty allows any. Leaving
      *                                 out playlist formats such as `hls` and
      *                                 `concat` stops a source from opening others.
+     * @param  array<string, int|string>  $options  Protocol options a URL input is
+     *                                              opened with, by ffmpeg's name for
+     *                                              them (`request_size`,
+     *                                              `multiple_requests`). A local
+     *                                              file is opened without them: it
+     *                                              has no such options, and ffmpeg
+     *                                              refuses a command that names one.
+     * @param  array<string, string>  $headers  Headers a URL input is requested
+     *                                          with, for a source that wants a
+     *                                          credential the URL cannot carry.
+     *                                          Kept out of every exception.
      *
      * @throws Unsupported
      * @throws Input
@@ -155,6 +172,8 @@ abstract class Adapter
         ?string $level = null,
         array $protocols = [],
         array $formats = [],
+        array $options = [],
+        array $headers = [],
     ) {
         $this->binary = $binary ?? static::BINARY;
         $this->timeout = $timeout ?? static::TIMEOUT;
@@ -162,14 +181,19 @@ abstract class Adapter
         $this->level = $level === null ? static::LEVEL : self::graded($level);
         $this->protocols = self::names($protocols);
         $this->formats = self::names($formats);
+        $this->options = self::settings($options);
+        $this->headers = self::fields($headers);
     }
 
     /**
-     * Options that restrict how the next input is opened, placed before it.
+     * Options that decide how the next input is opened, placed before it.
+     *
+     * The whitelists restrict any input. Protocol options and headers belong to
+     * a URL alone, so a local path is opened without them.
      *
      * @return list<string>
      */
-    protected function opens(): array
+    protected function opens(string $path): array
     {
         $args = [];
 
@@ -183,7 +207,76 @@ abstract class Adapter
             $args[] = \implode(',', $this->formats);
         }
 
+        if (! Source::remote($path)) {
+            return $args;
+        }
+
+        foreach ($this->options as $name => $value) {
+            $args[] = '-'.$name;
+            $args[] = $value;
+        }
+
+        if ($this->headers !== []) {
+            $lines = '';
+            foreach ($this->headers as $name => $value) {
+                $lines .= $name.': '.$value."\r\n";
+            }
+
+            $args[] = Process::HEADERS;
+            $args[] = $lines;
+        }
+
         return $args;
+    }
+
+    /**
+     * @param  array<mixed>  $options
+     * @return array<string, string>
+     *
+     * @throws Input
+     */
+    private static function settings(array $options): array
+    {
+        $settings = [];
+
+        foreach ($options as $name => $value) {
+            // Each becomes a flag of its own, so a name must be nothing but a name.
+            if (! \is_string($name) || \preg_match('/^[a-z0-9_]+$/', $name) !== 1) {
+                throw new Input('Invalid input option name: '.\var_export($name, true));
+            }
+            if (! \is_int($value) && (! \is_string($value) || \preg_match('/^[A-Za-z0-9_.:\/-]+$/', $value) !== 1)) {
+                throw new Input('Invalid value for input option "'.$name.'"');
+            }
+            $settings[$name] = (string) $value;
+        }
+
+        return $settings;
+    }
+
+    /**
+     * @param  array<mixed>  $headers
+     * @return array<string, string>
+     *
+     * @throws Input
+     */
+    private static function fields(array $headers): array
+    {
+        $fields = [];
+
+        foreach ($headers as $name => $value) {
+            if (! \is_string($name) || \preg_match('/^[A-Za-z0-9-]+$/', $name) !== 1) {
+                throw new Input('Invalid header name: '.\var_export($name, true));
+            }
+            // Joined into one argument a line each, so a value that carried a
+            // line break would add a header of its own. The value is not echoed:
+            // it is a credential.
+            if (! \is_string($value) || $value === '' || \preg_match('/[\x00-\x1F\x7F]/', $value) === 1) {
+                throw new Input('Invalid value for header "'.$name.'"');
+            }
+            $fields[$name] = $value;
+        }
+
+        return $fields;
     }
 
     /**
